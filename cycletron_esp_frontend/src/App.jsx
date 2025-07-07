@@ -91,6 +91,7 @@ function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [showVialSetup, setShowVialSetup] = useState(true);
   const [vialSetupStep, setVialSetupStep] = useState('prompt');
+  const [showRefillPopup, setShowRefillPopup] = useState(false);
   const [serverIP, setServerIP] = useState('localhost:5175');
 
   // Fetch server IP on component mount
@@ -288,15 +289,40 @@ function App() {
 
   const handleRefill = () => {
     const isCanceling = activeButton === 'refill';
-    sendButtonCommand('refill', !isCanceling); // send "on" if starting, "off" if canceling
-    setCycleState(isCanceling ? 'started' : 'refill');
-    setActiveButton(isCanceling ? null : 'refill');
+    
+    if (isCanceling) {
+      // If canceling, send the command immediately
+      sendButtonCommand('refill', false); // send "off" when canceling
+      setCycleState('started');
+      setActiveButton(null);
+      sendRecoveryUpdate({
+        parameters,
+        machineStep: 'started',
+        cycleState: 'started',
+        lastAction: 'started',
+        activeButton: null,
+        activeTab,
+      });
+    } else {
+      // If starting refill, show the popup first
+      setShowRefillPopup(true);
+    }
+  };
+
+  const handleRefillConfirm = () => {
+    // This is called when user clicks "Yes" in the refill popup
+    setShowRefillPopup(false);
+    
+    // Now send the actual refill command to ESP32
+    sendButtonCommand('refill', true); // send "on" to start refilling
+    setCycleState('refill');
+    setActiveButton('refill');
     sendRecoveryUpdate({
       parameters,
-      machineStep: isCanceling ? 'started' : 'refill',
-      cycleState: isCanceling ? 'started' : 'refill',
-      lastAction: isCanceling ? 'started' : 'refill',
-      activeButton: isCanceling ? null : 'refill',
+      machineStep: 'refill',
+      cycleState: 'refill',
+      lastAction: 'refill',
+      activeButton: 'refill',
       activeTab,
     });
   };
@@ -450,6 +476,47 @@ function App() {
                   Continue
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Refill Syringe Popup */}
+          {showRefillPopup && (
+            <div
+              style={{
+                position: 'absolute',
+                zIndex: 1000,
+                top: 0,
+                left: 0,
+                width: TAB_WIDTH,
+                maxWidth: '100%',
+                height: '100%',
+                background: 'rgba(255,255,255,0.98)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'auto',
+                padding: '2rem',
+              }}
+            >
+              <h1 className="title is-3 mb-4">Refill Syringe Instructions</h1>
+              <div className="content has-text-left mb-5" style={{ maxWidth: '500px' }}>
+                <p className="mb-3"><strong>Before replacing the syringe make sure you:</strong></p>
+                <ol>
+                  <li>Close the leur lock valve</li>
+                  <li>Unscrew the 2 nuts securing the syringe</li>
+                  <li>Completely remove the syringe from the system</li>
+                  <li>Place a full syringe in it's place</li>
+                  <li>Return Syringe to it's secured position</li>
+                </ol>
+              </div>
+              <button
+                className="button is-primary is-large"
+                style={{ fontSize: '1.5rem', padding: '1rem 3rem' }}
+                onClick={handleRefillConfirm}
+              >
+                Yes
+              </button>
             </div>
           )}
 
