@@ -37,5 +37,5 @@ bool movementForwardDone = false;
 bool movementBackDone = false;
 
 // Duration tracking
-float heatingDurationRemaining = 0;
-float mixingDurationRemaining = 0;
+extern float heatingDurationRemaining = 0;
+extern float mixingDurationRemaining = 0;

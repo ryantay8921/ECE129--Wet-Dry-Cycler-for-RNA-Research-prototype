@@ -130,10 +130,10 @@ void handleStateCommand(const String &name, const String &state)
             setState(SystemState::REFILLING);
             Serial.println("Refill started");
         }
-        else if (state == "off")
+        else
         {
             refillingStarted = false; // Reset the flag for next time
-            setState(previousState);
+            setState(previousState); // Use setState to restore timers and state
             Serial.println("Refill ended — resuming previous state");
         }
         break;
@@ -171,7 +171,7 @@ void handleStateCommand(const String &name, const String &state)
  *
  * @param data JSON object containing recovery state and parameters
  */
-void handleRecoveryPacket(const JsonObject &data)
+void handleRecoveryPacket(JsonObject data)
 {
     if (!data["currentState"].is<const char *>() || !data["parameters"].is<JsonObject>())
     {
@@ -182,36 +182,52 @@ void handleRecoveryPacket(const JsonObject &data)
 
     // Restore the last known operational state
     String recoveredState = data["currentState"].as<String>();
-    if (recoveredState == "HEATING")
-        currentState = SystemState::HEATING;
-    else if (recoveredState == "REHYDRATING")
-        currentState = SystemState::REHYDRATING;
-    else if (recoveredState == "MIXING")
-        currentState = SystemState::MIXING;
+    if (recoveredState == "IDLE")
+        setState(SystemState::IDLE);
+    else if (recoveredState == "VIAL_SETUP")
+        setState(SystemState::VIAL_SETUP);
+    else if (recoveredState == "WAITING")
+        setState(SystemState::WAITING);
     else if (recoveredState == "READY")
-        currentState = SystemState::READY;
+        setState(SystemState::READY);
+    else if (recoveredState == "HEATING")
+        setState(SystemState::HEATING);
+    else if (recoveredState == "REHYDRATING")
+        setState(SystemState::REHYDRATING);
+    else if (recoveredState == "MIXING")
+        setState(SystemState::MIXING);
+    else if (recoveredState == "EXTRACTING")
+        setState(SystemState::EXTRACTING);
+    else if (recoveredState == "REFILLING")
+        setState(SystemState::REFILLING);
+    else if (recoveredState == "PAUSED")
+        setState(SystemState::PAUSED);
+    else if (recoveredState == "ENDED")
+        setState(SystemState::ENDED);
+    else if (recoveredState == "LOGGING")
+        setState(SystemState::LOGGING);
     else
-        currentState = SystemState::IDLE;
+        setState(SystemState::IDLE);
 
     // Restore parameters
     JsonObject parameters = data["parameters"];
-    volumeAddedPerCycle = parameters["volumeAddedPerCycle"].is<float>() ? parameters["volumeAddedPerCycle"].as<float>() : 0.0;
-    syringeDiameter = parameters["syringeDiameter"].is<float>() ? parameters["syringeDiameter"].as<float>() : 0.0;
-    desiredHeatingTemperature = parameters["desiredHeatingTemperature"].is<int>() ? parameters["desiredHeatingTemperature"].as<int>() : 0.0;
-    durationOfHeating = parameters["durationOfHeating"].is<float>() ? parameters["durationOfHeating"].as<float>() : 0.0;
-    durationOfMixing = parameters["durationOfMixing"].is<float>() ? parameters["durationOfMixing"].as<float>() : 0.0;
-    numberOfCycles = parameters["numberOfCycles"].is<int>() ? parameters["numberOfCycles"].as<int>() : 0;
-    syringeStepCount = parameters["syringeStepCount"].is<int>() ? parameters["syringeStepCount"].as<int>() : 0;
-    heatingStartTime = parameters["heatingStartTime"].is<long>() ? parameters["heatingStartTime"].as<long>() : 0;
+    volumeAddedPerCycle = parameters["volumeAddedPerCycle"].is<const char *>() ? atof(parameters["volumeAddedPerCycle"].as<const char *>()) : parameters["volumeAddedPerCycle"].as<float>();
+    volumeAddedPerCycle = volumeAddedPerCycle * 12; // Change input from total liquid to volume per vial.
+    syringeDiameter = parameters["syringeDiameter"].is<const char *>() ? atof(parameters["syringeDiameter"].as<const char *>()) : parameters["syringeDiameter"].as<float>();
+    desiredHeatingTemperature = parameters["desiredHeatingTemperature"].is<const char *>() ? atof(parameters["desiredHeatingTemperature"].as<const char *>()) : parameters["desiredHeatingTemperature"].as<float>();
+    durationOfHeating = parameters["durationOfHeating"].is<const char *>() ? atof(parameters["durationOfHeating"].as<const char *>()) : parameters["durationOfHeating"].as<float>();
+    durationOfHeating = durationOfHeating * 60; // Convert seconds to minutes
+    durationOfMixing = parameters["durationOfMixing"].is<const char *>() ? atof(parameters["durationOfMixing"].as<const char *>()) : parameters["durationOfMixing"].as<float>();
+    numberOfCycles = parameters["numberOfCycles"].is<const char *>() ? atoi(parameters["numberOfCycles"].as<const char *>()) : parameters["numberOfCycles"].as<int>();
+    syringeStepCount = parameters["syringeStepCount"].is<const char *>() ? atoi(parameters["syringeStepCount"].as<const char *>()) : parameters["syringeStepCount"].as<int>();
+    heatingStartTime = parameters["heatingStartTime"].is<const char *>() ? atol(parameters["heatingStartTime"].as<const char *>()) : parameters["heatingStartTime"].as<long>();
     heatingStarted = parameters["heatingStarted"].is<bool>() ? parameters["heatingStarted"].as<bool>() : false;
-
-    mixingStartTime = parameters["mixingStartTime"].is<const char *>() ? atol(parameters["mixingStartTime"].as<const char *>()) : (parameters["mixingStartTime"].is<long>() ? parameters["mixingStartTime"].as<long>() : 0);
-
+    mixingStartTime = parameters["mixingStartTime"].is<const char *>() ? atol(parameters["mixingStartTime"].as<const char *>()) : parameters["mixingStartTime"].as<long>();
     mixingStarted = parameters["mixingStarted"].is<bool>() ? parameters["mixingStarted"].as<bool>() : false;
-    completedCycles = parameters["completedCycles"].is<int>() ? parameters["completedCycles"].as<int>() : 0;
-    currentCycle = parameters["currentCycle"].is<int>() ? parameters["currentCycle"].as<int>() : 0;
-    heatingProgressPercent = parameters["heatingProgress"].is<float>() ? parameters["heatingProgress"].as<float>() : 0.0;
-    mixingProgressPercent = parameters["mixingProgress"].is<float>() ? parameters["mixingProgress"].as<float>() : 0.0;
+    completedCycles = parameters["completedCycles"].is<const char *>() ? atoi(parameters["completedCycles"].as<const char *>()) : parameters["completedCycles"].as<int>();
+    currentCycle = parameters["currentCycle"].is<const char *>() ? atoi(parameters["currentCycle"].as<const char *>()) : parameters["currentCycle"].as<int>();
+    heatingProgressPercent = parameters["heatingProgress"].is<const char *>() ? atof(parameters["heatingProgress"].as<const char *>()) : parameters["heatingProgress"].as<float>();
+    mixingProgressPercent = parameters["mixingProgress"].is<const char *>() ? atof(parameters["mixingProgress"].as<const char *>()) : parameters["mixingProgress"].as<float>();
     // Restore sample zones
     sampleZoneCount = 0;
     if (parameters["sampleZonesToMix"].is<JsonArray>())
@@ -237,6 +253,8 @@ void handleRecoveryPacket(const JsonObject &data)
     Serial.printf("  Syringe Step Count: %d\n", syringeStepCount);
     Serial.printf("  HeatingStarted: %s | HeatingStartTime: %lu\n", heatingStarted ? "true" : "false", heatingProgressPercent);
     Serial.printf("  MixingStarted: %s | MixingStartTime: %lu\n", mixingStarted ? "true" : "false", mixingProgressPercent);
+    sendCycleProgress();
+
 }
 
 /**
@@ -251,12 +269,13 @@ void handleParametersPacket(const JsonObject &parameters)
 {
     // Handle both string and numeric values for parameters
     volumeAddedPerCycle = parameters["volumeAddedPerCycle"].is<const char *>() ? atof(parameters["volumeAddedPerCycle"].as<const char *>()) : parameters["volumeAddedPerCycle"].as<float>();
-
+    volumeAddedPerCycle = volumeAddedPerCycle * 12; // Change inout from total liquid to volume per vial.
     syringeDiameter = parameters["syringeDiameter"].is<const char *>() ? atof(parameters["syringeDiameter"].as<const char *>()) : parameters["syringeDiameter"].as<float>();
 
     desiredHeatingTemperature = parameters["desiredHeatingTemperature"].is<const char *>() ? atof(parameters["desiredHeatingTemperature"].as<const char *>()) : parameters["desiredHeatingTemperature"].as<float>();
 
     durationOfHeating = parameters["durationOfHeating"].is<const char *>() ? atof(parameters["durationOfHeating"].as<const char *>()) : parameters["durationOfHeating"].as<float>();
+    durationOfHeating = durationOfHeating * 60; // Convert seconds to minutes
 
     durationOfMixing = parameters["durationOfMixing"].is<const char *>() ? atof(parameters["durationOfMixing"].as<const char *>()) : parameters["durationOfMixing"].as<float>();
 

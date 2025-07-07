@@ -86,6 +86,7 @@ void loop()
     if (now - lastSent >= 1000)
     {
       sendTemperature();
+      sendCycleProgress();
       lastSent = now;
     }
     break;
@@ -108,8 +109,9 @@ void loop()
       movementForwardDone = false; // Reset both movement flag
       shouldMoveBack = false; // Reset back movement flag
       shouldMoveForward = false; // Reset forward movement flag
-      currentState = SystemState::WAITING; // Transition back to the previous state
+      setState(SystemState::WAITING); // Transition to WAITING state
       sendCurrentState();
+      sendCycleProgress();
     }
     // Only send state once on entry (handled by setState)
     break;
@@ -147,7 +149,7 @@ void loop()
     {
       Serial.println("[REHYDRATION] Final cycle already completed. Sending end packet and switching to ENDED.");
       sendEndOfCycles();
-      currentState = SystemState::ENDED;
+      setState(SystemState::ENDED);
       sendCurrentState(); // Notify state change to ENDED
       break;
     }
@@ -169,104 +171,95 @@ void loop()
 
   case SystemState::MIXING:
   {
+    // The bug: mixingProgressPercent is calculated at the start and likely already >= 100,
+    // so the state immediately transitions to HEATING.
+
     if (!mixingStarted)
     {
       Serial.println("[MIXING] Starting...");
-
-      // Decide how long to mix based on whether we're recovering
-      unsigned long mixTime = heatingStarted ? mixingDurationRemaining : (durationOfMixing * 1000);
       mixingStartTime = millis();
-      mixingDurationRemaining = mixTime;
+      mixingDurationRemaining = durationOfMixing * 1000;
       mixingStarted = true;
-
-      // Turn on motors for the selected sample zones
+      mixingProgressPercent = 0.0f; // <-- Reset progress at start
+    }
+    if (mixingStarted)
+    {
       for (int i = 0; i < sampleZoneCount; i++)
       {
         int zone = sampleZonesArray[i];
         int pin = (zone == 1) ? 11 : (zone == 2) ? 12
-                                 : (zone == 3)   ? 13
-                                                 : -1;
+                                  : (zone == 3)   ? 13
+                                                  : -1;
         if (pin != -1)
         {
-          Serial.printf("[MIXING] Motor ON for zone %d (GPIO %d)\n", zone, pin);
           MIXING_Motor_OnPin(pin);
         }
       }
     }
-
-    // Send progress update every second
     if (now - lastSent >= 1000)
     {
+      // Calculate progress based on elapsed time
+      float percentDone = ((float)(millis() - mixingStartTime) / (durationOfMixing * 1000.0)) * 100.0;
+      if (percentDone > 100.0)
+        percentDone = 100.0;
+      mixingProgressPercent = percentDone;
       sendMixingProgress();
       lastSent = now;
     }
 
-    // Check if the mixing duration has passed
-    if (millis() - mixingStartTime >= mixingDurationRemaining)
+    // Only update timer if not paused/extracting/refilling
+    if (currentState == SystemState::MIXING)
     {
-      Serial.println("[MIXING] Done. Turning off motors.");
-      MIXING_AllMotors_Off();
-      mixingStarted = false;
-      currentState = SystemState::HEATING;
-      sendCurrentState();
+      float percentDone = ((float)(millis() - mixingStartTime) / (durationOfMixing * 1000.0)) * 100.0;
+      if (percentDone >= 100.0f)
+      {
+        Serial.println("[MIXING] Done. Turning off motors.");
+        MIXING_AllMotors_Off();
+        mixingStarted = false;
+        setState(SystemState::HEATING);
+      }
     }
     break;
   }
 
   case SystemState::HEATING:
-  {
+{
     if (!heatingStarted)
     {
-      Serial.printf("[HEATING] Starting... durationOfHeating = %.2f\n", durationOfHeating);
-      unsigned long heatTime = heatingProgressPercent > 0
-                                   ? (unsigned long)((1.0 - (heatingProgressPercent / 100.0)) * durationOfHeating * 1000)
-                                   : (unsigned long)(durationOfHeating * 1000);
-
-      // If resuming from pause, use heatingDurationRemaining if set
-      if (heatingDurationRemaining > 0 && heatingDurationRemaining < heatTime) {
-        heatTime = heatingDurationRemaining;
-      }
-
-      heatingStartTime = millis();
-      heatingDurationRemaining = heatTime;
-      heatingStarted = true;
+        Serial.printf("[HEATING] Starting... durationOfHeating = %.2f\n", durationOfHeating);
+        heatingStartTime = millis();
+        heatingStarted = true;
+        heatingProgressPercent = 0.0f;
     }
 
-    // Control the heater
-    HEATING_Set_Temp((int)desiredHeatingTemperature);
+    if (heatingStarted)
+    {
+        HEATING_Set_Temp((int)desiredHeatingTemperature);
+    }
 
-    // Send telemetry every second
     if (now - lastSent >= 1000)
     {
-      sendTemperature();
-
-      // Send progress
-      unsigned long elapsed = millis() - heatingStartTime;
-      float percentDone = ((float)elapsed / heatingDurationRemaining) * 100.0;
-      if (percentDone > 100.0)
-        percentDone = 100.0;
-
-      ArduinoJson::JsonDocument doc; // auto-resizing with latest versions
-      sendHeatingProgress();
-
-      lastSent = now;
+        sendTemperature();
+        float percentDone = ((float)(millis() - heatingStartTime) / (durationOfHeating * 1000.0f)) * 100.0f;
+        if (percentDone > 100.0f) percentDone = 100.0f;
+        heatingProgressPercent = percentDone;
+        sendHeatingProgress();
+        lastSent = now;
     }
 
-    // Check if heating is complete
-    if (millis() - heatingStartTime >= heatingDurationRemaining)
+    if (heatingProgressPercent >= 100.0f)
     {
-      Serial.println("[HEATING] Done. Turning off heater.");
-      HEATING_Off();
-      heatingStarted = false;
-      completedCycles++;
-      currentCycle++;
-      sendCycleProgress();
-      currentState = SystemState::REHYDRATING;
-      sendCurrentState();
+        Serial.println("[HEATING] Done. Turning off heater.");
+        HEATING_Off();
+        heatingStarted = false;
+        completedCycles++;
+        currentCycle++;
+        sendCycleProgress();
+        setState(SystemState::REHYDRATING);
     }
-
-    break;
   }
+    break;
+
 
   case SystemState::REFILLING:
     if (!refillingStarted)
@@ -276,9 +269,6 @@ void loop()
       syringeStepCount = 0;          // Reset step counter
       sendSyringeResetInfo();        // Notify webserver
       refillingStarted = true;
-      // Stay in REFILLING state until we receive a "no" command
-      // The state transition will be handled by handleStateCommand when
-      // it receives "refill":"no" from the frontend
     }
     break;
 
@@ -300,7 +290,7 @@ void loop()
       movementForwardDone = false; // Reset both movement flag
       shouldMoveBack = false; // Reset back movement flag
       shouldMoveForward = false; // Reset forward movement flag
-      currentState = previousState; // Transition back to the previous state
+      setState(previousState); // Use setState to restore timers and state
       sendCurrentState();
     }
     break;

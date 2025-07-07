@@ -44,31 +44,41 @@ void setState(SystemState newState)
         }
     }
     // If resuming from PAUSED, EXTRACTING, or REFILLING, adjust start times and remaining durations
-    if ((currentState == SystemState::PAUSED ||
+    if ((currentState == SystemState::IDLE || 
+         currentState == SystemState::PAUSED ||
          currentState == SystemState::EXTRACTING ||
          currentState == SystemState::REFILLING) &&
         (newState != SystemState::PAUSED &&
          newState != SystemState::EXTRACTING &&
          newState != SystemState::REFILLING))
     {
-        if (previousState == SystemState::HEATING)
-        {
-            heatingStartTime = millis() - pausedElapsedTime;
-            heatingDurationRemaining -= pausedElapsedTime;
-            if (heatingDurationRemaining < 0)
-                heatingDurationRemaining = 0;
+        if (pausedElapsedTime > 0) {
+            // Restore progress after refill (or pause/extract)
+            if (previousState == SystemState::HEATING)
+            {
+                heatingDurationRemaining = heatingDurationRemaining - pausedElapsedTime;
+                if ((long)heatingDurationRemaining < 0)
+                    heatingDurationRemaining = 0;
+                heatingStartTime = millis() - ((durationOfHeating * 1000) - heatingDurationRemaining);
+                heatingStarted = true; // set to true so main loop does NOT re-init
+            }
+            else if (previousState == SystemState::MIXING)
+            {
+                // mixingStartTime = millis();
+                // mixingDurationRemaining = (durationOfMixing * 1000) - pausedElapsedTime;
+                // if (mixingDurationRemaining < 0)
+                //     mixingDurationRemaining = 0;
+                mixingDurationRemaining = mixingDurationRemaining - pausedElapsedTime;
+                if ((long)mixingDurationRemaining < 0)
+                    mixingDurationRemaining = 0;
+                mixingStartTime = millis() - ((durationOfMixing * 1000) - mixingDurationRemaining);
+                mixingStarted = true; // set to true so main loop does NOT re-init
+            }
+            pausedElapsedTime = 0;
+            pausedAtTime = 0;
         }
-        else if (previousState == SystemState::MIXING)
-        {
-            mixingStartTime = millis() - pausedElapsedTime;
-            mixingDurationRemaining -= pausedElapsedTime;
-            if (mixingDurationRemaining < 0)
-                mixingDurationRemaining = 0;
-        }
-        pausedElapsedTime = 0;
-        pausedAtTime = 0;
     }
-    // --- END PAUSE/RESUME LOGIC ---
+    //--- END PAUSE/RESUME LOGIC ---
 
     // Stop motors if transitioning to PAUSED state
     if (newState == SystemState::PAUSED ||
@@ -89,6 +99,7 @@ void setState(SystemState newState)
             Serial.println("[PAUSED] Motors stopped due to state transition");
         }
     }
+    
 
     if (currentState != SystemState::PAUSED &&
         currentState != SystemState::REFILLING &&
@@ -96,6 +107,38 @@ void setState(SystemState newState)
     {
         previousState = currentState;
     }
+
+    // --- Ensure heatingStarted is reset when leaving HEATING ---
+    if (currentState == SystemState::HEATING && newState != SystemState::HEATING) {
+        heatingStarted = false;
+        
+    }
+    if (currentState == SystemState::MIXING && newState != SystemState::MIXING) {
+        mixingStarted = false;
+    }
+   // Reset flags when entering new state
+    if (newState == SystemState::HEATING) {
+        heatingProgressPercent = 0.0f;
+    }
+
+    if (newState == SystemState::MIXING) {
+        mixingProgressPercent = 0.0f;
+    }
+
+    // --- Only initialize timers if entering HEATING or MIXING from a different state ---
+    if (newState == SystemState::HEATING && !heatingStarted) {
+        heatingDurationRemaining = durationOfHeating * 1000;
+        heatingStartTime = millis();
+        heatingStarted = true;
+
+    }
+    if (newState == SystemState::MIXING && !mixingStarted) {
+        mixingDurationRemaining = durationOfMixing;
+        mixingStartTime = millis();
+        mixingStarted = true;
+
+    }
+
     currentState = newState;
     sendCurrentState();
 }

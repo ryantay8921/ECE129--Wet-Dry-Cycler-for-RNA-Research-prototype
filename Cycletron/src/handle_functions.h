@@ -44,7 +44,7 @@ void handleStateCommand(const String &name, const String &state);
  *
  * @param data JSON object with saved system state and parameters
  */
-void handleRecoveryPacket(const JsonObject &data);
+void handleRecoveryPacket(JsonObject data);
 
 /**
  * @brief Parses and stores configuration parameters sent from the front-end.
