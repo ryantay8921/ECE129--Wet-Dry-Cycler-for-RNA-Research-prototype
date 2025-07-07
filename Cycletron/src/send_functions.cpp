@@ -33,16 +33,16 @@ void sendTemperature()
 
 void sendSyringePercentage()
 {
-  float percentUsed = ((float)syringeStepCount / (float)MAX_SYRINGE_STEPS * 100.0);
+  // float percentUsed = ((float)syringeStepCount / (float)MAX_SYRINGE_STEPS * 100.0);
 
-  ArduinoJson::JsonDocument doc;
-  doc["type"] = "syringePercentage";
-  doc["value"] = percentUsed;
+  // ArduinoJson::JsonDocument doc;
+  // doc["type"] = "syringePercentage";
+  // doc["value"] = percentUsed;
 
-  char buffer[100];
-  serializeJson(doc, buffer);
-  webSocket.sendTXT(buffer);
-  Serial.printf("[WS] Sent syringe percentage remaining: %.2f%%\n", percentUsed);
+  // char buffer[100];
+  // serializeJson(doc, buffer);
+  // webSocket.sendTXT(buffer);
+  // Serial.printf("[WS] Sent syringe percentage remaining: %.2f%%\n", percentUsed);
 }
 
 void sendHeatingProgress()
@@ -117,17 +117,17 @@ void sendEndOfCycles()
 
 void sendSyringeResetInfo()
 {
-  ArduinoJson::JsonDocument doc;
-  doc["type"] = "syringeReset";
-  doc["steps"] = syringeStepCount;
+//   ArduinoJson::JsonDocument doc;
+//   doc["type"] = "syringeReset";
+//   doc["steps"] = syringeStepCount;
 
-  String message;
-  serializeJson(doc, message);
-  webSocket.sendTXT(message);
+//   String message;
+//   serializeJson(doc, message);
+//   webSocket.sendTXT(message);
 
-  Serial.println("[WS] Sent syringe reset info");
+//   Serial.println("[WS] Sent syringe reset info");
+// }
 }
-
 void sendExtractionReady() 
 {
     ArduinoJson::JsonDocument doc;
@@ -252,7 +252,7 @@ void sendRecoveryPacketToServer()
   parameters["durationOfHeating"] = durationOfHeating;
   parameters["durationOfMixing"] = durationOfMixing;
   parameters["numberOfCycles"] = numberOfCycles;
-  parameters["syringeStepCount"] = syringeStepCount;
+  // parameters["syringeStepCount"] = syringeStepCount;
   parameters["heatingStartTime"] = heatingStartTime;
   parameters["heatingStarted"] = heatingStarted;
   parameters["mixingStartTime"] = mixingStartTime;
@@ -298,7 +298,7 @@ const char* systemErrorTypeToString(SystemErrorType errorType) {
         case ERROR_MOVEMENT_MAX_STEPS_BACKWARD:
             return "Exceeded max steps moving backward";
         case ERROR_SYRINGE_MAX_STEPS:
-            return "Syringe step count would exceed safe range";
+            return "Syringe is empty or front bumper is pressed! Check syringe and front bumper.";
         case ERROR_DRV8825_FAULT:
             return "DRV8825 fault pin is active! Check wiring or wall power for the DRV8825s.";
         // Add more cases as needed
@@ -314,4 +314,16 @@ void sendSystemError(SystemErrorType errorType) {
     String json;
     serializeJson(doc, json);
     webSocket.sendTXT(json);
+}
+
+void sendSyringeFrontBumperPressed()
+{
+  ArduinoJson::JsonDocument doc;
+  doc["type"] = "syringeFrontBumper";
+  doc["pressed"] = true;
+
+  char buffer[100];
+  serializeJson(doc, buffer);
+  webSocket.sendTXT(buffer);
+  Serial.println("[WS] Sent front rehydration bumper pressed notification");
 }

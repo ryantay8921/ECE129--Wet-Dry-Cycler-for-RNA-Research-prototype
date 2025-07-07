@@ -98,4 +98,14 @@ void sendExtractionReady();
  */
 void sendSystemError(SystemErrorType errorType);
 
+
+/**
+ * @brief Sends syringe front bumper pressed notification
+ * 
+ * Notifies the frontend that the syringe front bumper has been pressed
+ * indicating an empty syringe or a fault condition
+ */
+void sendSyringeFrontBumperPressed();
+
+
 #endif // SEND_FUNCTIONS_H

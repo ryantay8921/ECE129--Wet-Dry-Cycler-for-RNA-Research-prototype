@@ -15,7 +15,7 @@
 #define TESTING_MAIN
 
 #define Serial0 Serial
-#define ServerIP "10.0.0.30"
+#define ServerIP "10.0.0.202"
 #define ServerPort 5175
 
 // === Wi-Fi Credentials ===
@@ -85,8 +85,8 @@ void loop()
     // Await vialSetup packet from frontend
     if (now - lastSent >= 1000)
     {
+      sendCurrentState();
       sendTemperature();
-      sendCycleProgress();
       lastSent = now;
     }
     break;
@@ -159,10 +159,8 @@ void loop()
     Serial.printf("[REHYDRATION] Dispensing %.2f uL of water using a %.2f inch diameter syringe (%d steps).\n",
                   volumeAddedPerCycle, syringeDiameter, stepsToMove);
 
-    syringeStepCount += stepsToMove;
     Rehydration_Push((uint32_t)volumeAddedPerCycle, syringeDiameter);
 
-    sendSyringePercentage();
 
     currentState = SystemState::MIXING;
     sendCurrentState();
@@ -266,8 +264,8 @@ void loop()
     {
       Serial.println("[STATE] REFILLING: Moving back until back bumper is hit");
       Rehydration_BackUntilBumper(); // Retract fully
-      syringeStepCount = 0;          // Reset step counter
-      sendSyringeResetInfo();        // Notify webserver
+      // syringeStepCount = 0;          // Reset step counter
+      // sendSyringeResetInfo();        // Notify webserver
       refillingStarted = true;
     }
     break;

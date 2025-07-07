@@ -44,7 +44,7 @@ extern int sampleZoneCount;
 
 //Globals variables used for recovery and updated with the frontend
 // These are used to track the state of the system and the progress of operations
-extern int syringeStepCount;
+extern bool syringeFrontBumper;
 extern unsigned long heatingStartTime;
 extern unsigned long mixingStartTime;
 extern bool heatingStarted;

@@ -19,7 +19,7 @@ int sampleZonesArray[3] = {0};
 int sampleZoneCount = 0;
 
 // Runtime tracking variables
-int syringeStepCount = 0;
+bool syringeFrontBumper = false;
 unsigned long heatingStartTime = 0;
 unsigned long mixingStartTime = 0;
 bool heatingStarted = false;

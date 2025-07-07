@@ -219,7 +219,7 @@ void handleRecoveryPacket(JsonObject data)
     durationOfHeating = durationOfHeating * 60; // Convert seconds to minutes
     durationOfMixing = parameters["durationOfMixing"].is<const char *>() ? atof(parameters["durationOfMixing"].as<const char *>()) : parameters["durationOfMixing"].as<float>();
     numberOfCycles = parameters["numberOfCycles"].is<const char *>() ? atoi(parameters["numberOfCycles"].as<const char *>()) : parameters["numberOfCycles"].as<int>();
-    syringeStepCount = parameters["syringeStepCount"].is<const char *>() ? atoi(parameters["syringeStepCount"].as<const char *>()) : parameters["syringeStepCount"].as<int>();
+    // syringeStepCount = parameters["syringeStepCount"].is<const char *>() ? atoi(parameters["syringeStepCount"].as<const char *>()) : parameters["syringeStepCount"].as<int>();
     heatingStartTime = parameters["heatingStartTime"].is<const char *>() ? atol(parameters["heatingStartTime"].as<const char *>()) : parameters["heatingStartTime"].as<long>();
     heatingStarted = parameters["heatingStarted"].is<bool>() ? parameters["heatingStarted"].as<bool>() : false;
     mixingStartTime = parameters["mixingStartTime"].is<const char *>() ? atol(parameters["mixingStartTime"].as<const char *>()) : parameters["mixingStartTime"].as<long>();
@@ -250,7 +250,7 @@ void handleRecoveryPacket(JsonObject data)
     Serial.printf("  Heating temp: %.2f °C for %.2f s\n", desiredHeatingTemperature, durationOfHeating);
     Serial.printf("  Mixing duration: %.2f s with %d zone(s)\n", durationOfMixing, sampleZoneCount);
     Serial.printf("  Number of cycles: %d (completed: %d, current: %d)\n", numberOfCycles, completedCycles, currentCycle);
-    Serial.printf("  Syringe Step Count: %d\n", syringeStepCount);
+    // Serial.printf("  Syringe Step Count: %d\n", syringeStepCount);
     Serial.printf("  HeatingStarted: %s | HeatingStartTime: %lu\n", heatingStarted ? "true" : "false", heatingProgressPercent);
     Serial.printf("  MixingStarted: %s | MixingStartTime: %lu\n", mixingStarted ? "true" : "false", mixingProgressPercent);
     sendCycleProgress();

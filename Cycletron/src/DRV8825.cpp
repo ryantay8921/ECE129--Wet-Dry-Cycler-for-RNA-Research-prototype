@@ -13,7 +13,8 @@
  #include <Arduino.h>
  #include "DRV8825.h"
  #include "send_functions.h"
- 
+  #include "REHYDRATION.h"
+
 //  #define DRV8825_TEST
  
  /**
@@ -110,6 +111,14 @@
     //    Serial.printf("[DRV8825] Fault detected at step %d\n", i);
     //    break;
     //  }
+              // Error check: will this exceed max steps?
+    BUMPER_STATE = R_CheckBumpers();
+    if (BUMPER_STATE == 1) {
+        Serial.println("[ERROR] Syringe is empty and cannot push fluid! Aborting push.");
+        sendSyringeFrontBumperPressed();
+        sendSystemError(ERROR_SYRINGE_MAX_STEPS);
+        return;
+    }
  
      DRV8825_Step(motor);         // Send one step pulse
      delayMicroseconds(delay_us); // Wait before next pulse
@@ -123,6 +132,8 @@
   *        Calls both direction-setting and stepping functions.
   */
  void DRV8825_Move(DRV8825_t *motor, int steps, int direction, int delay_us) {
+
+
     DRV8825_Set_Direction(motor, direction);      // Set rotation direction
     DRV8825_Step_N(motor, steps, delay_us);       // Execute movement
  }
