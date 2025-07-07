@@ -312,10 +312,27 @@ wss.on('connection', (ws, req) => {
           // Preserve existing parameters when updating state
           const existingParameters = espRecoveryState.parameters || {};
           
+          // Update heating/mixing started flags based on state transitions
+          if (newState === 'HEATING') {
+            existingParameters.heatingStarted = true;
+            console.log(`[ESP RECOVERY] ESP32 entered HEATING state - setting heatingStarted = true`);
+          } else if (espRecoveryState.currentState === 'HEATING' && newState !== 'HEATING') {
+            existingParameters.heatingStarted = false;
+            console.log(`[ESP RECOVERY] ESP32 exited HEATING state - setting heatingStarted = false`);
+          }
+          
+          if (newState === 'MIXING') {
+            existingParameters.mixingStarted = true;
+            console.log(`[ESP RECOVERY] ESP32 entered MIXING state - setting mixingStarted = true`);
+          } else if (espRecoveryState.currentState === 'MIXING' && newState !== 'MIXING') {
+            existingParameters.mixingStarted = false;
+            console.log(`[ESP RECOVERY] ESP32 exited MIXING state - setting mixingStarted = false`);
+          }
+          
           espRecoveryState = {
             currentState: newState,
             timestamp: new Date().toISOString(),
-            parameters: existingParameters  // Keep existing parameters
+            parameters: existingParameters  // Keep existing parameters with updated flags
           };
           
           // Use debounced file saving to prevent frequent I/O
@@ -374,6 +391,44 @@ wss.on('connection', (ws, req) => {
         
         // Temperature is already forwarded by the general ESP32 message forwarding above
         // No need for duplicate temperatureUpdate messages
+      }
+
+      // Handle ESP32 progress updates and store in recovery state
+      if (msg.type === 'heatingProgress' && isEspClient) {
+        if (!espRecoveryState.parameters) espRecoveryState.parameters = {};
+        espRecoveryState.parameters.heatingProgress = msg.value;
+        saveEspRecoveryStateDebounced();
+      }
+
+      if (msg.type === 'mixingProgress' && isEspClient) {
+        if (!espRecoveryState.parameters) espRecoveryState.parameters = {};
+        espRecoveryState.parameters.mixingProgress = msg.value;
+        saveEspRecoveryStateDebounced();
+      }
+
+      if (msg.type === 'cycleProgress' && isEspClient) {
+        if (!espRecoveryState.parameters) espRecoveryState.parameters = {};
+        espRecoveryState.parameters.completedCycles = msg.completed;
+        espRecoveryState.parameters.currentCycle = msg.completed + 1; // Current cycle is one more than completed
+        espRecoveryState.parameters.cycleProgress = msg.percent;
+        saveEspRecoveryStateDebounced();
+        console.log(`[ESP RECOVERY] Updated cycle progress: ${msg.completed}/${msg.total} cycles`);
+      }
+
+      // Handle ESP32 recovery state updates (includes full progress information)
+      if (msg.type === 'espRecoveryState' && isEspClient) {
+        console.log(`[ESP RECOVERY] Received full recovery state from ESP32:`, msg.data);
+        
+        // Store the complete recovery state with all progress information
+        espRecoveryState = {
+          currentState: msg.data.currentState,
+          timestamp: new Date().toISOString(),
+          parameters: msg.data.parameters || {}
+        };
+        
+        // Save to database with debouncing
+        saveEspRecoveryStateDebounced();
+        console.log(`[ESP RECOVERY] Updated complete recovery state: ${msg.data.currentState}`);
       }
 
       if (msg.type === 'button' && msg.name === 'startCycle') {
