@@ -4,10 +4,21 @@ const path = require('path');
 const WebSocket = require('ws');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
+const os = require('os');
 const { exec } = require('child_process'); // For opening file location in Explorer
 
 const app = express();
 const PORT = 5175;
+
+// Helper function to get user's Downloads directory
+function getDownloadsDirectory() {
+  const homeDir = os.homedir();
+  if (process.platform === 'win32') {
+    return path.join(homeDir, 'Downloads');
+  } else {
+    return path.join(homeDir, 'Downloads');
+  }
+}
 
 // Change recovery file paths to be in the /server/ folder and update names
 const recoveryFile = path.join(__dirname, 'Frontend_Recovery.json');
@@ -255,6 +266,46 @@ app.get('/api/serverIP', (req, res) => {
   res.json({ 
     serverIP: serverIP,
     serverAddress: `${serverIP}:5174`
+  });
+});
+
+// Add route to download log files
+app.get('/api/download/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const downloadsDir = getDownloadsDirectory();
+  const filePath = path.join(downloadsDir, filename);
+  
+  // Check if file exists
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  
+  // Set headers for file download
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Type', 'application/json');
+  
+  // Stream the file to the client
+  const fileStream = fs.createReadStream(filePath);
+  fileStream.pipe(res);
+  
+  fileStream.on('end', () => {
+    console.log(`File download completed: ${filename}`);
+    
+    // Open file location after download
+    setTimeout(() => {
+      if (process.platform === 'win32') {
+        exec(`explorer.exe /select,"${filePath.replace(/\//g, '\\')}"`);
+      } else if (process.platform === 'darwin') {
+        exec(`open -R "${filePath}"`);
+      } else {
+        console.log('Automatic file opening not supported on this OS.');
+      }
+    }, 500); // Small delay to ensure download completes
+  });
+  
+  fileStream.on('error', (err) => {
+    console.error('Error streaming file:', err);
+    res.status(500).json({ error: 'Error downloading file' });
   });
 });
 
@@ -581,7 +632,11 @@ wss.on('connection', (ws, req) => {
         const pad = n => n.toString().padStart(2, '0');
         const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
         const timeStr = `${pad(now.getHours())}-${pad(now.getMinutes())}`;
-        const logFile = path.join(__dirname, '..', `Log_Cycle_${dateStr}_${timeStr}.json`);
+        const filename = `Log_Cycle_${dateStr}_${timeStr}.json`;
+        
+        // Save to user's Downloads directory
+        const downloadsDir = getDownloadsDirectory();
+        const logFile = path.join(downloadsDir, filename);
 
         // Compose log entry with ordered parameters
         const p = msg.parameters || {};
@@ -605,20 +660,33 @@ wss.on('connection', (ws, req) => {
           totalDurationFormatted: msg.totalDurationFormatted || null,
         };
 
-        // Write the entry to a new file (async to prevent blocking)
+        // Write the entry to Downloads directory
         fs.writeFile(logFile, JSON.stringify(entry, null, 2), (err) => {
           if (err) {
             console.error('Failed to write log file:', err);
+            // Send error response to frontend
+            for (const client of clients) {
+              if (client.readyState === WebSocket.OPEN && !espClients.has(client)) {
+                client.send(JSON.stringify({ 
+                  type: 'logCycleResult', 
+                  success: false, 
+                  error: 'Failed to save log file' 
+                }));
+              }
+            }
           } else {
             console.log('Logged cycle to:', logFile);
-
-            // Optionally open the file location
-            if (process.platform === 'win32') {
-              exec(`explorer.exe /select,"${logFile.replace(/\//g, '\\')}"`);
-            } else if (process.platform === 'darwin') {
-              exec(`open -R "${logFile}"`);
-            } else {
-              console.log('Automatic file opening not supported on this OS.');
+            
+            // Send success response with download info to frontend
+            for (const client of clients) {
+              if (client.readyState === WebSocket.OPEN && !espClients.has(client)) {
+                client.send(JSON.stringify({ 
+                  type: 'logCycleResult', 
+                  success: true, 
+                  filename: filename,
+                  downloadUrl: `/api/download/${filename}`
+                }));
+              }
             }
           }
         });

@@ -138,6 +138,21 @@ export function WebSocketProvider({ children }) {
                         setSyringeStatus(msg.status || 'ready');
                         console.log(`Syringe status updated: ${msg.status}`);
                         break;
+                    case 'logCycleResult':
+                        console.log('Log cycle result:', msg);
+                        if (msg.success && msg.downloadUrl) {
+                            // Trigger file download
+                            const link = document.createElement('a');
+                            link.href = msg.downloadUrl;
+                            link.download = msg.filename;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            console.log(`Downloading log file: ${msg.filename}`);
+                        } else if (!msg.success) {
+                            console.error('Log cycle failed:', msg.error);
+                        }
+                        break;
                     case 'currentState':
                         setCurrentState(msg.value || 'UNKNOWN');
                         console.log(`ESP32 state updated: ${msg.value}`);
