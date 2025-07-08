@@ -415,6 +415,50 @@ wss.on('connection', (ws, req) => {
         console.log(`[ESP RECOVERY] Updated cycle progress: ${msg.completed}/${msg.total} cycles`);
       }
 
+      // Handle syringe front bumper pressed (syringe empty)
+      if (msg.type === 'syringeFrontBumper' && isEspClient) {
+        if (!espRecoveryState.parameters) espRecoveryState.parameters = {};
+        espRecoveryState.parameters.syringeStatus = 'empty';
+        saveEspRecoveryStateDebounced();
+        console.log(`[ESP RECOVERY] Syringe front bumper pressed - marking syringe as empty`);
+        
+        // Also update frontend recovery state so UI can react immediately
+        recoveryState.syringeStatus = 'empty';
+        saveRecoveryState();
+        
+        // Broadcast syringe status update to all frontend clients
+        for (const client of clients) {
+          if (client.readyState === WebSocket.OPEN && !espClients.has(client)) {
+            client.send(JSON.stringify({ 
+              type: 'syringeStatus', 
+              status: 'empty' 
+            }));
+          }
+        }
+      }
+
+      // Handle syringe refilled message from frontend
+      if (msg.type === 'syringeRefilled' && !isEspClient) {
+        if (!espRecoveryState.parameters) espRecoveryState.parameters = {};
+        espRecoveryState.parameters.syringeStatus = 'ready';
+        saveEspRecoveryStateDebounced();
+        console.log(`[ESP RECOVERY] Syringe refilled - marking syringe as ready`);
+        
+        // Also update frontend recovery state
+        recoveryState.syringeStatus = 'ready';
+        saveRecoveryState();
+        
+        // Broadcast syringe status update to all frontend clients
+        for (const client of clients) {
+          if (client.readyState === WebSocket.OPEN && !espClients.has(client)) {
+            client.send(JSON.stringify({ 
+              type: 'syringeStatus', 
+              status: 'ready' 
+            }));
+          }
+        }
+      }
+
       // Handle ESP32 recovery state updates (includes full progress information)
       if (msg.type === 'espRecoveryState' && isEspClient) {
         console.log(`[ESP RECOVERY] Received full recovery state from ESP32:`, msg.data);
@@ -474,6 +518,13 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({
             type: 'recoveryState',
             data: recoveryState
+          }));
+          
+          // Also send current syringe status to frontend clients
+          const currentSyringeStatus = (espRecoveryState.parameters && espRecoveryState.parameters.syringeStatus) || 'ready';
+          ws.send(JSON.stringify({
+            type: 'syringeStatus',
+            status: currentSyringeStatus
           }));
         }
       }

@@ -75,6 +75,7 @@ function App() {
     currentTemp,
     currentState,
     systemErrors,
+    syringeStatus,
     espOutputs,
     setEspOutputs,
     sendParameters,
@@ -82,6 +83,7 @@ function App() {
     sendRecoveryUpdate,
     resetRecoveryState,
     clearSystemErrors,
+    resetSyringeStatus,
   } = useWebSocket();
 
   const [parameters, setParameters] = useState(INITIAL_PARAMETERS);
@@ -312,6 +314,9 @@ function App() {
   const handleRefillConfirm = () => {
     // This is called when user clicks "Yes" in the refill popup
     setShowRefillPopup(false);
+    
+    // Reset syringe status to ready
+    resetSyringeStatus();
     
     // Now send the actual refill command to ESP32
     sendButtonCommand('refill', true); // send "on" to start refilling
@@ -685,11 +690,11 @@ function App() {
                 <span
                   className="tag is-medium"
                   style={{
-                    backgroundColor: (espOutputs.syringeUsed || 0) < 100 ? 'green' : 'red',
+                    backgroundColor: syringeStatus === 'ready' ? 'green' : 'red',
                     color: 'white',
                   }}
                 >
-                  {(espOutputs.syringeUsed || 0) < 100 ? 'Syringe Ready' : 'Syringe Empty'}
+                  {syringeStatus === 'ready' ? 'Syringe Ready' : 'SYRINGE EMPTY'}
                 </span>
               </div>
               <div className="column is-full">

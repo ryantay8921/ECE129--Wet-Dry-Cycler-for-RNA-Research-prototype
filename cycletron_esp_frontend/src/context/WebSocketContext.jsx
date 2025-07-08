@@ -18,6 +18,7 @@ export function WebSocketProvider({ children }) {
     const [currentTemp, setCurrentTemp] = useState(null);
     const [currentState, setCurrentState] = useState('UNKNOWN');
     const [systemErrors, setSystemErrors] = useState([]);
+    const [syringeStatus, setSyringeStatus] = useState('ready'); // 'ready' or 'empty'
     const [espOutputs, setEspOutputs] = useState({
         syringeLimit: 0,
         extractionReady: 'N/A',
@@ -133,6 +134,10 @@ export function WebSocketProvider({ children }) {
                             syringeUsed: msg.value || 0,
                         }));
                         break;
+                    case 'syringeStatus':
+                        setSyringeStatus(msg.status || 'ready');
+                        console.log(`Syringe status updated: ${msg.status}`);
+                        break;
                     case 'currentState':
                         setCurrentState(msg.value || 'UNKNOWN');
                         console.log(`ESP32 state updated: ${msg.value}`);
@@ -228,6 +233,12 @@ export function WebSocketProvider({ children }) {
 
     const clearSystemErrors = () => setSystemErrors([]);
 
+    const resetSyringeStatus = () => {
+        setSyringeStatus('ready');
+        // Send message to server to update syringe status
+        sendMessage({ type: 'syringeRefilled' });
+    };
+
     // Initialize connection on mount
     useEffect(() => {
         mountedRef.current = true;
@@ -290,6 +301,7 @@ export function WebSocketProvider({ children }) {
         currentTemp,
         currentState,
         systemErrors,
+        syringeStatus,
         espOutputs,
         setEspOutputs,
         sendParameters,
@@ -299,6 +311,7 @@ export function WebSocketProvider({ children }) {
         sendMessage,
         resetRecoveryState,
         clearSystemErrors,
+        resetSyringeStatus,
     };
 
     return (
