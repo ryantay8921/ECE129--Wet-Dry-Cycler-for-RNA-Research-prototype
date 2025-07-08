@@ -95,6 +95,7 @@ function App() {
   const [vialSetupStep, setVialSetupStep] = useState('prompt');
   const [showRefillPopup, setShowRefillPopup] = useState(false);
   const [serverIP, setServerIP] = useState('localhost:5175');
+  const [cycleStartTimestamp, setCycleStartTimestamp] = useState(null);
 
   // Fetch server IP on component mount
   useEffect(() => {
@@ -117,6 +118,7 @@ function App() {
       setActiveTab(recoveryState.activeTab || 'parameters');
       setCycleState(recoveryState.cycleState || 'idle');
       setActiveButton(recoveryState.activeButton || null);
+      setCycleStartTimestamp(recoveryState.cycleStartTimestamp || null);
       setVialSetupStep(
         recoveryState.vialSetupStep !== undefined
           ? recoveryState.vialSetupStep
@@ -142,13 +144,30 @@ function App() {
   useEffect(() => {
     const handleEspEndOfCycles = (event) => {
       console.log('Received ESP32 endOfCycles event:', event.detail);
+      
+      // Calculate timing information for the automatic log
+      const endTimestamp = new Date().toISOString();
+      let totalDurationMs = 0;
+      let totalDurationFormatted = 'N/A';
+      
+      if (cycleStartTimestamp) {
+        totalDurationMs = new Date(endTimestamp) - new Date(cycleStartTimestamp);
+        const hours = Math.floor(totalDurationMs / (1000 * 60 * 60));
+        const minutes = Math.floor((totalDurationMs % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((totalDurationMs % (1000 * 60)) / 1000);
+        totalDurationFormatted = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      }
+      
       // Call handleLogCycle and then handleEndCycle directly
       // Exclude extractionReady from espOutputs (syringeLeft is calculated, so no need to exclude)
       const { extractionReady, ...filteredEspOutputs } = espOutputs;
       sendButtonCommand('logCycle', true, {
         parameters,
         espOutputs: filteredEspOutputs,
-        timestamp: new Date().toISOString(),
+        timestamp: endTimestamp,
+        cycleStartTimestamp: cycleStartTimestamp,
+        totalDurationMs: totalDurationMs,
+        totalDurationFormatted: totalDurationFormatted,
       });
       
       // Wait a moment for the log to complete, then end the cycle
@@ -157,6 +176,7 @@ function App() {
         setCycleState('idle'); // Reset the cycle state to 'idle'
         setActiveButton(null); // Reset the active button
         setIsPaused(false); // Ensure the paused state is reset
+        setCycleStartTimestamp(null); // Reset the cycle start timestamp
         sendRecoveryUpdate({
           parameters,
           machineStep: 'idle',
@@ -164,6 +184,7 @@ function App() {
           lastAction: 'endCycle',
           progress: 0,
           activeTab: 'parameters',
+          cycleStartTimestamp: null, // Clear timestamp in recovery state
         });
         setVialSetupStep('prompt'); // Reset the vial setup step
         setShowVialSetup(true); // Show the vial setup prompt again
@@ -176,7 +197,7 @@ function App() {
     return () => {
       window.removeEventListener('espEndOfCycles', handleEspEndOfCycles);
     };
-  }, [espOutputs, parameters, sendButtonCommand, sendRecoveryUpdate, setCycleState, setActiveButton, setIsPaused, setVialSetupStep, setShowVialSetup, setActiveTab]);
+  }, [espOutputs, parameters, sendButtonCommand, sendRecoveryUpdate, setCycleState, setActiveButton, setIsPaused, setVialSetupStep, setShowVialSetup, setActiveTab, cycleStartTimestamp]);
 
   const handleParameterChange = (key, value) => {
     if (value === '' || Number(value) >= 0) {
@@ -207,6 +228,9 @@ function App() {
   };
 
   const handleStartCycle = () => {
+    const startTimestamp = new Date().toISOString();
+    setCycleStartTimestamp(startTimestamp);
+    
     sendButtonCommand('startCycle', true);
     setCycleState('started');
     setActiveButton(null);
@@ -215,6 +239,7 @@ function App() {
       cycleState: 'started', // <-- important!
       lastAction: 'startCycle',
       progress: 0,
+      cycleStartTimestamp: startTimestamp, // Store in recovery state too
     });
   };
 
@@ -242,6 +267,7 @@ function App() {
     setCycleState('idle'); // Reset the cycle state to 'idle'
     setActiveButton(null); // Reset the active button
     setIsPaused(false); // Ensure the paused state is reset
+    setCycleStartTimestamp(null); // Reset the cycle start timestamp
     sendRecoveryUpdate({
       // ...parameters,
       parameters, // <-- add this line
@@ -250,6 +276,7 @@ function App() {
       lastAction: 'endCycle',
       progress: 0,
       activeTab: 'parameters',
+      cycleStartTimestamp: null, // Clear timestamp in recovery state
     });
     // setParameters(INITIAL_PARAMETERS); // Reset parameters to initial state
     setVialSetupStep('prompt'); // Reset the vial setup step
@@ -333,12 +360,27 @@ function App() {
   };
 
   const handleLogCycle = () => {
+    const endTimestamp = new Date().toISOString();
+    let totalDurationMs = 0;
+    let totalDurationFormatted = 'N/A';
+    
+    if (cycleStartTimestamp) {
+      totalDurationMs = new Date(endTimestamp) - new Date(cycleStartTimestamp);
+      const hours = Math.floor(totalDurationMs / (1000 * 60 * 60));
+      const minutes = Math.floor((totalDurationMs % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((totalDurationMs % (1000 * 60)) / 1000);
+      totalDurationFormatted = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
     // Exclude extractionReady from espOutputs (syringeLeft is calculated, so no need to exclude)
     const { extractionReady, ...filteredEspOutputs } = espOutputs;
     sendButtonCommand('logCycle', true, {
       parameters,
       espOutputs: filteredEspOutputs,
-      timestamp: new Date().toISOString(),
+      timestamp: endTimestamp,
+      cycleStartTimestamp: cycleStartTimestamp,
+      totalDurationMs: totalDurationMs,
+      totalDurationFormatted: totalDurationFormatted,
     });
   };
 

@@ -600,6 +600,9 @@ wss.on('connection', (ws, req) => {
           timestamp: msg.timestamp || now.toISOString(),
           parameters: orderedParameters,
           espOutputs: msg.espOutputs || null,
+          cycleStartTimestamp: msg.cycleStartTimestamp || null,
+          totalDurationMs: msg.totalDurationMs || null,
+          totalDurationFormatted: msg.totalDurationFormatted || null,
         };
 
         // Write the entry to a new file (async to prevent blocking)
