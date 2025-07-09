@@ -21,7 +21,7 @@
 // === Wi-Fi Credentials ===
 const char* ssid = "Panda";
 const char* password = "UeU9YYmy5s";
-
+ 
 
 
 unsigned long lastSent = 0; // Last time a message was sent to the server
