@@ -161,7 +161,6 @@ if %errorlevel% equ 0 (
 )
 
 start http://localhost:5174
-start http://localhost:5175
 
 echo All services should be started. Check the Backend and Frontend windows for any error messages.
 pause
