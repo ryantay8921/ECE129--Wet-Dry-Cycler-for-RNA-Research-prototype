@@ -272,8 +272,8 @@ app.get('/api/serverIP', (req, res) => {
 // Add route to download log files
 app.get('/api/download/:filename', (req, res) => {
   const filename = req.params.filename;
-  const downloadsDir = getDownloadsDirectory();
-  const filePath = path.join(downloadsDir, filename);
+  const tempDir = path.join(__dirname, 'temp');
+  const filePath = path.join(tempDir, filename);
   
   // Check if file exists
   if (!fs.existsSync(filePath)) {
@@ -291,16 +291,13 @@ app.get('/api/download/:filename', (req, res) => {
   fileStream.on('end', () => {
     console.log(`File download completed: ${filename}`);
     
-    // Open file location after download
+    // Clean up the temp file after download
     setTimeout(() => {
-      if (process.platform === 'win32') {
-        exec(`explorer.exe /select,"${filePath.replace(/\//g, '\\')}"`);
-      } else if (process.platform === 'darwin') {
-        exec(`open -R "${filePath}"`);
-      } else {
-        console.log('Automatic file opening not supported on this OS.');
-      }
-    }, 500); // Small delay to ensure download completes
+      fs.unlink(filePath, (err) => {
+        if (err) console.error('Failed to clean up temp file:', err);
+        else console.log(`Cleaned up temp file: ${filename}`);
+      });
+    }, 1000); // Wait 1 second before cleanup to ensure download completes
   });
   
   fileStream.on('error', (err) => {
@@ -399,8 +396,6 @@ wss.on('connection', (ws, req) => {
             client.send(JSON.stringify({ type: 'heartbeat', from: 'esp32' }));
           }
         }
-        // Optionally, you can log the heartbeat
-        // console.log('Received heartbeat from ESP32');
         return;
       }
 
@@ -627,16 +622,19 @@ wss.on('connection', (ws, req) => {
 
       // Handle log cycle button
       if (msg.type === 'button' && msg.name === 'logCycle') {
-        // Format: Log_Cycle_YYYY-MM-DD_HH-MM.json (safe for Windows/Mac)
+        // Format: Log_Cycle_YYYY-MM-DD_HH-MM-SS.json (safe for Windows/Mac)
         const now = new Date();
         const pad = n => n.toString().padStart(2, '0');
         const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-        const timeStr = `${pad(now.getHours())}-${pad(now.getMinutes())}`;
+        const timeStr = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
         const filename = `Log_Cycle_${dateStr}_${timeStr}.json`;
         
-        // Save to user's Downloads directory
-        const downloadsDir = getDownloadsDirectory();
-        const logFile = path.join(downloadsDir, filename);
+        // Save to server's temp directory instead of Downloads folder
+        const tempDir = path.join(__dirname, 'temp');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+        const logFile = path.join(tempDir, filename);
 
         // Compose log entry with ordered parameters
         const p = msg.parameters || {};
@@ -664,29 +662,25 @@ wss.on('connection', (ws, req) => {
         fs.writeFile(logFile, JSON.stringify(entry, null, 2), (err) => {
           if (err) {
             console.error('Failed to write log file:', err);
-            // Send error response to frontend
-            for (const client of clients) {
-              if (client.readyState === WebSocket.OPEN && !espClients.has(client)) {
-                client.send(JSON.stringify({ 
-                  type: 'logCycleResult', 
-                  success: false, 
-                  error: 'Failed to save log file' 
-                }));
-              }
+            // Send error response only to the requesting client
+            if (ws.readyState === WebSocket.OPEN && !espClients.has(ws)) {
+              ws.send(JSON.stringify({ 
+                type: 'logCycleResult', 
+                success: false, 
+                error: 'Failed to save log file' 
+              }));
             }
           } else {
             console.log('Logged cycle to:', logFile);
             
-            // Send success response with download info to frontend
-            for (const client of clients) {
-              if (client.readyState === WebSocket.OPEN && !espClients.has(client)) {
-                client.send(JSON.stringify({ 
-                  type: 'logCycleResult', 
-                  success: true, 
-                  filename: filename,
-                  downloadUrl: `/api/download/${filename}`
-                }));
-              }
+            // Send success response only to the requesting client
+            if (ws.readyState === WebSocket.OPEN && !espClients.has(ws)) {
+              ws.send(JSON.stringify({ 
+                type: 'logCycleResult', 
+                success: true, 
+                filename: filename,
+                downloadUrl: `/api/download/${filename}`
+              }));
             }
           }
         });
