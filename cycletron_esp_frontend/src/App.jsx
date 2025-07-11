@@ -96,6 +96,12 @@ function App() {
   const [showRefillPopup, setShowRefillPopup] = useState(false);
   const [serverIP, setServerIP] = useState('localhost:5175');
   const [cycleStartTimestamp, setCycleStartTimestamp] = useState(null);
+  
+  // Countdown timer state
+  const [countdownTime, setCountdownTime] = useState(0); // in seconds
+  const [isCountdownActive, setIsCountdownActive] = useState(false);
+  const [countdownStartTime, setCountdownStartTime] = useState(null);
+  const [countdownPausedTime, setCountdownPausedTime] = useState(0); // accumulated paused time
 
   // Fetch server IP on component mount
   useEffect(() => {
@@ -129,6 +135,31 @@ function App() {
         recoveryState.cycleState === 'paused' ||
         recoveryState.activeButton === 'pauseCycle'
       );
+      
+      // Restore countdown timer state
+      if (recoveryState.countdownTime !== undefined) {
+        const savedCountdownTime = recoveryState.countdownTime;
+        const wasActive = recoveryState.isCountdownActive;
+        const savedStartTime = recoveryState.countdownStartTime;
+        
+        // If the countdown was active, we need to calculate how much time has passed
+        // and adjust the remaining time accordingly
+        if (wasActive && savedStartTime && savedCountdownTime > 0) {
+          const now = Date.now();
+          const elapsedSinceStart = Math.floor((now - savedStartTime) / 1000);
+          const adjustedCountdownTime = Math.max(0, savedCountdownTime - elapsedSinceStart);
+          
+          setCountdownTime(adjustedCountdownTime);
+          setIsCountdownActive(adjustedCountdownTime > 0); // Only active if time remaining
+        } else {
+          // Timer was paused or finished, restore as-is
+          setCountdownTime(savedCountdownTime);
+          setIsCountdownActive(wasActive && savedCountdownTime > 0);
+        }
+        
+        setCountdownStartTime(savedStartTime);
+        setCountdownPausedTime(recoveryState.countdownPausedTime || 0);
+      }
     }
   }, [recoveryState]);
 
@@ -172,6 +203,12 @@ function App() {
       
       // Wait a moment for the log to complete, then end the cycle
       setTimeout(() => {
+        // Reset countdown timer
+        setCountdownTime(0);
+        setIsCountdownActive(false);
+        setCountdownStartTime(null);
+        setCountdownPausedTime(0);
+        
         sendButtonCommand('endCycle', true); // Send 'on' to the server
         setCycleState('idle'); // Reset the cycle state to 'idle'
         setActiveButton(null); // Reset the active button
@@ -185,6 +222,10 @@ function App() {
           progress: 0,
           activeTab: 'parameters',
           cycleStartTimestamp: null, // Clear timestamp in recovery state
+          countdownTime: 0,
+          isCountdownActive: false,
+          countdownStartTime: null,
+          countdownPausedTime: 0,
         });
         setVialSetupStep('prompt'); // Reset the vial setup step
         setShowVialSetup(true); // Show the vial setup prompt again
@@ -198,6 +239,67 @@ function App() {
       window.removeEventListener('espEndOfCycles', handleEspEndOfCycles);
     };
   }, [espOutputs, parameters, sendButtonCommand, sendRecoveryUpdate, setCycleState, setActiveButton, setIsPaused, setVialSetupStep, setShowVialSetup, setActiveTab, cycleStartTimestamp]);
+
+  // Countdown timer logic
+  useEffect(() => {
+    let interval = null;
+    let saveInterval = null;
+    
+    if (isCountdownActive && countdownTime > 0) {
+      interval = setInterval(() => {
+        setCountdownTime((prevTime) => {
+          if (prevTime <= 1) {
+            setIsCountdownActive(false);
+            return 0;
+          }
+          return prevTime - 1;
+        });
+      }, 1000);
+      
+      // Save countdown state every 10 seconds while active for recovery purposes
+      saveInterval = setInterval(() => {
+        if (countdownTime > 0) {
+          sendRecoveryUpdate({
+            countdownTime: countdownTime,
+            isCountdownActive: true,
+            countdownStartTime: countdownStartTime,
+            countdownPausedTime: countdownPausedTime,
+            lastSavedAt: Date.now(),
+          });
+        }
+      }, 10000); // Save every 10 seconds
+    } else if (!isCountdownActive && countdownTime !== 0) {
+      clearInterval(interval);
+      clearInterval(saveInterval);
+    }
+    
+    return () => {
+      clearInterval(interval);
+      clearInterval(saveInterval);
+    };
+  }, [isCountdownActive, countdownTime, countdownStartTime, countdownPausedTime, sendRecoveryUpdate]);
+
+  // Calculate total experiment time based on parameters
+  const calculateExperimentTime = () => {
+    const heatingMinutes = parseFloat(parameters.durationOfHeating) || 0;
+    const mixingSeconds = parseFloat(parameters.durationOfMixing) || 0;
+    const cycles = parseInt(parameters.numberOfCycles) || 0;
+    
+    // Convert everything to seconds
+    const heatingSecondsPerCycle = heatingMinutes * 60;
+    const totalSecondsPerCycle = heatingSecondsPerCycle + mixingSeconds;
+    
+    return totalSecondsPerCycle * cycles;
+  };
+
+  // Format time in HH:MM:SS format
+  const formatTime = (totalSeconds) => {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
 
   const handleParameterChange = (key, value) => {
     if (value === '' || Number(value) >= 0) {
@@ -231,6 +333,13 @@ function App() {
     const startTimestamp = new Date().toISOString();
     setCycleStartTimestamp(startTimestamp);
     
+    // Start countdown timer
+    const totalTime = calculateExperimentTime();
+    setCountdownTime(totalTime);
+    setIsCountdownActive(true);
+    setCountdownStartTime(Date.now());
+    setCountdownPausedTime(0);
+    
     sendButtonCommand('startCycle', true);
     setCycleState('started');
     setActiveButton(null);
@@ -240,11 +349,24 @@ function App() {
       lastAction: 'startCycle',
       progress: 0,
       cycleStartTimestamp: startTimestamp, // Store in recovery state too
+      countdownTime: totalTime,
+      isCountdownActive: true,
+      countdownStartTime: Date.now(),
+      countdownPausedTime: 0,
+      lastSavedAt: Date.now(), // Add timestamp for recovery calculation
     });
   };
 
   const handlePauseCycle = () => {
     const isPausing = !isPaused;
+    
+    // Handle countdown timer pause/resume
+    if (isPausing) {
+      setIsCountdownActive(false);
+    } else {
+      setIsCountdownActive(true);
+    }
+    
     sendButtonCommand('pauseCycle', isPausing);
     setCycleState(isPausing ? 'paused' : 'started');
     setIsPaused(isPausing);
@@ -256,12 +378,23 @@ function App() {
       lastAction: isPausing ? 'pauseCycle' : 'started',
       activeButton: isPausing ? 'pauseCycle' : null,
       activeTab,
+      countdownTime: countdownTime,
+      isCountdownActive: !isPausing,
+      countdownStartTime: countdownStartTime,
+      countdownPausedTime: countdownPausedTime,
+      lastSavedAt: Date.now(),
     });
   };
 
   const handleEndCycle = () => {
     // Automatically log the cycle before ending
     handleLogCycle();
+    
+    // Reset countdown timer
+    setCountdownTime(0);
+    setIsCountdownActive(false);
+    setCountdownStartTime(null);
+    setCountdownPausedTime(0);
     
     sendButtonCommand('endCycle', true); // Send 'on' to the server
     setCycleState('idle'); // Reset the cycle state to 'idle'
@@ -277,6 +410,10 @@ function App() {
       progress: 0,
       activeTab: 'parameters',
       cycleStartTimestamp: null, // Clear timestamp in recovery state
+      countdownTime: 0,
+      isCountdownActive: false,
+      countdownStartTime: null,
+      countdownPausedTime: 0,
     });
     // setParameters(INITIAL_PARAMETERS); // Reset parameters to initial state
     setVialSetupStep('prompt'); // Reset the vial setup step
@@ -286,6 +423,16 @@ function App() {
 
   const handleExtract = () => {
     const isCanceling = activeButton === 'extract';
+    
+    // Handle countdown timer pause/resume for extract
+    if (!isCanceling) {
+      // Starting extraction - pause countdown
+      setIsCountdownActive(false);
+    } else {
+      // Canceling extraction - resume countdown
+      setIsCountdownActive(true);
+    }
+    
     sendButtonCommand('extract', !isCanceling); // send "on" if starting, "off" if canceling
     setCycleState(isCanceling ? 'started' : 'extract');
     setActiveButton(isCanceling ? null : 'extract');
@@ -313,6 +460,11 @@ function App() {
       lastAction: isCanceling ? 'started' : 'extract',
       activeButton: isCanceling ? null : 'extract',
       activeTab,
+      countdownTime: countdownTime,
+      isCountdownActive: isCanceling,
+      countdownStartTime: countdownStartTime,
+      countdownPausedTime: countdownPausedTime,
+      lastSavedAt: Date.now(),
     });
   };
 
@@ -320,7 +472,8 @@ function App() {
     const isCanceling = activeButton === 'refill';
     
     if (isCanceling) {
-      // If canceling, send the command immediately
+      // If canceling, send the command immediately and resume countdown
+      setIsCountdownActive(true);
       sendButtonCommand('refill', false); // send "off" when canceling
       setCycleState('started');
       setActiveButton(null);
@@ -331,6 +484,11 @@ function App() {
         lastAction: 'started',
         activeButton: null,
         activeTab,
+        countdownTime: countdownTime,
+        isCountdownActive: true,
+        countdownStartTime: countdownStartTime,
+        countdownPausedTime: countdownPausedTime,
+        lastSavedAt: Date.now(),
       });
     } else {
       // If starting refill, show the popup first
@@ -341,6 +499,9 @@ function App() {
   const handleRefillConfirm = () => {
     // This is called when user clicks "Yes" in the refill popup
     setShowRefillPopup(false);
+    
+    // Pause countdown during refill
+    setIsCountdownActive(false);
     
     // Reset syringe status to ready
     resetSyringeStatus();
@@ -356,6 +517,11 @@ function App() {
       lastAction: 'refill',
       activeButton: 'refill',
       activeTab,
+      countdownTime: countdownTime,
+      isCountdownActive: false,
+      countdownStartTime: countdownStartTime,
+      countdownPausedTime: countdownPausedTime,
+      lastSavedAt: Date.now(),
     });
   };
 
@@ -663,6 +829,36 @@ function App() {
         <div className="column is-one-quarter">
           <div className="box" style={{ maxWidth: 400 }}>
             <h2 className="title is-5">ESP32 Outputs</h2>
+            
+            {/* Countdown Timer - only show when experiment is running */}
+            {(cycleState === 'started' || cycleState === 'paused' || cycleState === 'extract' || cycleState === 'refill') && (
+              <div className="column is-full mb-4">
+                <div className="box has-background-info-light">
+                  <label className="label is-small">Experiment Completion Time</label>
+                  <div className="field">
+                    <div className="control">
+                      <input
+                        type="text"
+                        className="input is-small has-text-weight-bold has-text-centered"
+                        value={formatTime(countdownTime)}
+                        readOnly
+                        style={{
+                          backgroundColor: countdownTime <= 300 ? '#ffdd57' : // Yellow when 5 min or less
+                                         countdownTime <= 60 ? '#ff3860' : // Red when 1 min or less
+                                         '#48c78e', // Green otherwise
+                          color: countdownTime <= 60 ? 'white' : 'black',
+                          fontSize: '1.2rem'
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <p className="is-size-7 has-text-centered">
+                    {!isCountdownActive && countdownTime > 0 ? 'Timer Paused' : 'Time Remaining'}
+                  </p>
+                </div>
+              </div>
+            )}
+            
             <div className="columns is-full is-multiline">
               <div className="column is-full">
                 <label className="label is-small">Current ESP32 State</label>
