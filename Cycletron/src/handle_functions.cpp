@@ -74,6 +74,7 @@ void handleStateCommand(const String &name, const String &state)
         {
             setState(SystemState::WAITING);
             Serial.println("State changed to WAITING");
+
         }
         else
         {
@@ -84,8 +85,8 @@ void handleStateCommand(const String &name, const String &state)
     case CommandType::START_CYCLE:
         if (state == "on")
         {
-            setState(SystemState::REHYDRATING);
-            Serial.println("State changed to REHYDRATING");
+            setState(SystemState::HEATING);
+            Serial.println("State changed to HEATING");
         }
         break;
 
@@ -241,6 +242,40 @@ void handleRecoveryPacket(JsonObject data)
             }
         }
     }
+     // --- Recovery logic for heating progress ---
+    if (parameters["heatingProgress"].is<const char*>())
+        heatingProgressPercent = atof(parameters["heatingProgress"].as<const char*>());
+    else
+        heatingProgressPercent = parameters["heatingProgress"].as<float>();
+
+    heatingStarted = parameters["heatingStarted"].is<bool>() ? parameters["heatingStarted"].as<bool>() : false;
+
+    // If we are recovering into a heating state and heatingStarted is true, set up the timer and remaining duration
+    if ((recoveredState == "HEATING" || recoveredState == "PAUSED") && heatingStarted) {
+        float percent = heatingProgressPercent;
+        if (percent < 0.0f) percent = 0.0f;
+        if (percent > 100.0f) percent = 100.0f;
+        float totalMs = durationOfHeating * 1000.0f;
+        heatingDurationRemaining = (1.0f - percent / 100.0f) * totalMs;
+        heatingStartTime = millis() - (unsigned long)(percent / 100.0f * totalMs);
+    }
+
+    // --- Recovery logic for mixing progress ---
+    if (parameters["mixingProgress"].is<const char*>())
+        mixingProgressPercent = atof(parameters["mixingProgress"].as<const char*>());
+    else
+        mixingProgressPercent = parameters["mixingProgress"].as<float>();
+
+    mixingStarted = parameters["mixingStarted"].is<bool>() ? parameters["mixingStarted"].as<bool>() : false;
+
+    if ((recoveredState == "MIXING" || recoveredState == "PAUSED") && mixingStarted) {
+        float percent = mixingProgressPercent;
+        if (percent < 0.0f) percent = 0.0f;
+        if (percent > 100.0f) percent = 100.0f;
+        float totalMs = durationOfMixing * 1000.0f;
+        mixingDurationRemaining = (1.0f - percent / 100.0f) * totalMs;
+        mixingStartTime = millis() - (unsigned long)(percent / 100.0f * totalMs);
+    }
 
     // Print recovery state for debugging
     Serial.println("[RECOVERY] Restored system state and parameters:");
@@ -251,8 +286,8 @@ void handleRecoveryPacket(JsonObject data)
     Serial.printf("  Mixing duration: %.2f s with %d zone(s)\n", durationOfMixing, sampleZoneCount);
     Serial.printf("  Number of cycles: %d (completed: %d, current: %d)\n", numberOfCycles, completedCycles, currentCycle);
     // Serial.printf("  Syringe Step Count: %d\n", syringeStepCount);
-    Serial.printf("  HeatingStarted: %s | HeatingStartTime: %lu\n", heatingStarted ? "true" : "false", heatingProgressPercent);
-    Serial.printf("  MixingStarted: %s | MixingStartTime: %lu\n", mixingStarted ? "true" : "false", mixingProgressPercent);
+    Serial.printf("  HeatingStarted: %s | HeatingProgressPercent: %lu\n", heatingStarted ? "true" : "false", heatingProgressPercent);
+    Serial.printf("  MixingStarted: %s | MixingProgressPercent: %lu\n", mixingStarted ? "true" : "false", mixingProgressPercent);
     sendCycleProgress();
 
 }

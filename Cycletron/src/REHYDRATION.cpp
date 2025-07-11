@@ -248,38 +248,23 @@ void Rehydration_BackUntilBumper() {
  */
 int R_CheckBumpers()
 {
-  static unsigned long lastFrontTriggerTime = 0;
-  static unsigned long lastBackTriggerTime = 0;
-  unsigned long now = millis();
-  
-  if (rehydrationFrontTriggered)
-  {
-    // Software debouncing: ignore triggers within 50ms of last trigger
-    if (now - lastFrontTriggerTime > 50) {
-      rehydrationFrontTriggered = false; // Reset flag
-      lastFrontTriggerTime = now;
-      BUMPER_STATE = 1;
-      Serial.println("[Rehydration] Front bumper triggered.");
-      return 1;
-    } else {
-      rehydrationFrontTriggered = false; // Reset flag but ignore trigger
+    int front = digitalRead(bumpers_r.front_bumper_pin);
+    int back = digitalRead(bumpers_r.back_bumper_pin);
+
+    if (front == HIGH) {
+        BUMPER_STATE = 1;
+        // Optionally print only on state change
+        // Serial.println("[Rehydration] Front bumper pressed.");
+        return 1;
     }
-  }
-  if (rehydrationBackTriggered)
-  {
-    // Software debouncing: ignore triggers within 50ms of last trigger
-    if (now - lastBackTriggerTime > 50) {
-      rehydrationBackTriggered = false; // Reset flag
-      lastBackTriggerTime = now;
-      BUMPER_STATE = 2;
-      Serial.println("[Rehydration] Back bumper triggered.");
-      return 2;
-    } else {
-      rehydrationBackTriggered = false; // Reset flag but ignore trigger
+    if (back == HIGH) {
+        BUMPER_STATE = 2;
+        // Serial.println("[Rehydration] Back bumper pressed.");
+        return 2;
     }
-  }
-  BUMPER_STATE = 0;
-  return 0;
+    BUMPER_STATE = 0;
+    return 0;
+
 }
 
 /**

@@ -106,22 +106,28 @@
    DRV8825_Enable(motor);  // Enable motor driver
  
    for (int i = 0; i < steps; i++) {
-     // Stop if fault is detected
-    //  if (DRV8825_Check_Fault(motor)) {
-    //    Serial.printf("[DRV8825] Fault detected at step %d\n", i);
-    //    break;
-    //  }
-              // Error check: will this exceed max steps?
-    BUMPER_STATE = R_CheckBumpers();
-    if (BUMPER_STATE == 1) {
-        Serial.println("[ERROR] Syringe is empty and cannot push fluid! Aborting push.");
-        sendSyringeFrontBumperPressed();
-        sendSystemError(ERROR_SYRINGE_MAX_STEPS);
-        return;
-    }
- 
-     DRV8825_Step(motor);         // Send one step pulse
-     delayMicroseconds(delay_us); // Wait before next pulse
+   
+      // Check bumper before every step
+      BUMPER_STATE = R_CheckBumpers();
+      if (BUMPER_STATE == 1 && currentState != SystemState::REFILLING) {
+          Serial.println("[ERROR] Syringe is empty and cannot push fluid! Aborting push.");
+          sendSyringeFrontBumperPressed();
+          sendSystemError(ERROR_SYRINGE_MAX_STEPS);
+          // Set a global flag so all future pushes are blocked
+          syringeFrontBumper = true;
+          DRV8825_Disable(motor);  // Disable motor to conserve power and get rid of noise
+          
+          return;
+      }
+      // If the global flag is set, abort immediately (prevents future pushes)
+      if (syringeFrontBumper) {
+          Serial.println("[ERROR] Syringe front bumper previously triggered. Aborting push.");
+          DRV8825_Disable(motor);  // Disable motor to conserve power and get rid of noise
+
+          return;
+      }
+      DRV8825_Step(motor);         // Send one step pulse
+      delayMicroseconds(delay_us); // Wait before next pulse
    }
  
    DRV8825_Disable(motor);  // Disable motor to conserve power

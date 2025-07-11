@@ -111,6 +111,7 @@ void loop()
     if (now - lastSent >= 1000)
     {
       sendTemperature();
+      sendCycleProgress();
       lastSent = now;
     }
     break;
@@ -126,30 +127,84 @@ void loop()
     if (now - lastSent >= 1000)
     {
       sendTemperature();
+      sendCycleProgress();
+
       lastSent = now;
     }
     break;
 
-  case SystemState::REHYDRATING:
+   case SystemState::HEATING:
   {
-    // Only send state once on entry (handled by setState)
-    Serial.println("[STATE] Rehydrating...");
     if (currentCycle >= numberOfCycles)
     {
-      Serial.println("[REHYDRATION] Final cycle already completed. Sending end packet and switching to ENDED.");
+      Serial.println("[HEATING] Final cycle already completed. Sending end packet and switching to ENDED.");
       sendEndOfCycles();
       setState(SystemState::ENDED);
       sendCurrentState(); // Notify state change to ENDED
       break;
     }
+    if (!heatingStarted)
+    {
+        Serial.printf("[HEATING] Starting... durationOfHeating = %.2f\n", durationOfHeating);
+        heatingStartTime = millis();
+        heatingStarted = true;
+        heatingProgressPercent = 0.0f;
+    }
+
+    if (heatingStarted)
+    {
+        HEATING_Set_Temp((int)desiredHeatingTemperature);
+    }
+
+    if (now - lastSent >= 1000)
+    {
+        sendTemperature();
+        float percentDone = ((float)(millis() - heatingStartTime) / (durationOfHeating * 1000.0f)) * 100.0f;
+        if (percentDone > 100.0f) percentDone = 100.0f;
+        heatingProgressPercent = percentDone;
+        sendHeatingProgress();
+        lastSent = now;
+    }
+
+    if (heatingProgressPercent >= 100.0f)
+    {
+        Serial.println("[HEATING] Done. Turning off heater.");
+        HEATING_Off();
+        heatingStarted = false;
+        completedCycles++;
+        currentCycle++;
+        sendCycleProgress();
+        setState(SystemState::REHYDRATING);
+    }
+  }
+    break;
+
+
+  case SystemState::REHYDRATING:
+  {
+    // Only send state once on entry (handled by setState)
+    Serial.println("[STATE] Rehydrating...");
     float uL_per_step = calculate_uL_per_step(syringeDiameter);
     int stepsToMove = (int)(volumeAddedPerCycle / uL_per_step);
 
     Serial.printf("[REHYDRATION] Dispensing %.2f uL of water using a %.2f inch diameter syringe (%d steps).\n",
                   volumeAddedPerCycle, syringeDiameter, stepsToMove);
 
-    Rehydration_Push((uint32_t)volumeAddedPerCycle, syringeDiameter);
+    // Always check bumper and set flag before any push attempt
+    BUMPER_STATE = R_CheckBumpers();
+    if (BUMPER_STATE == 1) {
+        syringeFrontBumper = true;
+        Serial.println("[ERROR] Syringe is empty and cannot push fluid! Aborting push.");
+        sendSyringeFrontBumperPressed();
+        sendSystemError(ERROR_SYRINGE_MAX_STEPS);
+    }
 
+    if (syringeFrontBumper) {
+        Serial.println("[REHYDRATION] Syringe front bumper active, skipping push.");
+    } else {
+        // Only call Rehydration_Push with the correct volume, not steps!
+        Rehydration_Push((uint32_t)volumeAddedPerCycle, syringeDiameter);
+    }
 
     currentState = SystemState::MIXING;
     sendCurrentState();
@@ -209,49 +264,13 @@ void loop()
     break;
   }
 
-  case SystemState::HEATING:
-{
-    if (!heatingStarted)
-    {
-        Serial.printf("[HEATING] Starting... durationOfHeating = %.2f\n", durationOfHeating);
-        heatingStartTime = millis();
-        heatingStarted = true;
-        heatingProgressPercent = 0.0f;
-    }
-
-    if (heatingStarted)
-    {
-        HEATING_Set_Temp((int)desiredHeatingTemperature);
-    }
-
-    if (now - lastSent >= 1000)
-    {
-        sendTemperature();
-        float percentDone = ((float)(millis() - heatingStartTime) / (durationOfHeating * 1000.0f)) * 100.0f;
-        if (percentDone > 100.0f) percentDone = 100.0f;
-        heatingProgressPercent = percentDone;
-        sendHeatingProgress();
-        lastSent = now;
-    }
-
-    if (heatingProgressPercent >= 100.0f)
-    {
-        Serial.println("[HEATING] Done. Turning off heater.");
-        HEATING_Off();
-        heatingStarted = false;
-        completedCycles++;
-        currentCycle++;
-        sendCycleProgress();
-        setState(SystemState::REHYDRATING);
-    }
-  }
-    break;
-
+ 
 
   case SystemState::REFILLING:
     if (!refillingStarted)
     {
       Serial.println("[STATE] REFILLING: Moving back until back bumper is hit");
+      syringeFrontBumper = false;
       Rehydration_BackUntilBumper(); // Retract fully
       // syringeStepCount = 0;          // Reset step counter
       // sendSyringeResetInfo();        // Notify webserver
