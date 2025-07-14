@@ -90,6 +90,7 @@ void loop()
     }
     else if (shouldMoveBack && !movementBackDone)
     {
+      
       Serial.println("[VIAL_SETUP] Flag down — moving backward...");
       MOVEMENT_Move_BACKWARD();
       movementForwardDone = true; // Reset forward movement flag
@@ -101,6 +102,13 @@ void loop()
       setState(SystemState::WAITING); // Transition to WAITING state
       sendCurrentState();
       sendCycleProgress();
+
+    }
+    if (now - lastSent >= 1000)
+    {
+      sendTemperature();
+      sendCycleProgress();
+      lastSent = now;
     }
     // Only send state once on entry (handled by setState)
     break;
@@ -171,8 +179,6 @@ void loop()
         Serial.println("[HEATING] Done. Turning off heater.");
         HEATING_Off();
         heatingStarted = false;
-        completedCycles++;
-        currentCycle++;
         sendCycleProgress();
         setState(SystemState::REHYDRATING);
     }
@@ -256,6 +262,8 @@ void loop()
       if (percentDone >= 100.0f)
       {
         Serial.println("[MIXING] Done. Turning off motors.");
+        completedCycles++;
+        currentCycle++;
         MIXING_AllMotors_Off();
         mixingStarted = false;
         setState(SystemState::HEATING);
