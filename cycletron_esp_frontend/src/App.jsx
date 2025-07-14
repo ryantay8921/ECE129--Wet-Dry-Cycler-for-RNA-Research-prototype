@@ -81,6 +81,7 @@ function App() {
     sendParameters,
     sendButtonCommand,
     sendRecoveryUpdate,
+    sendRecoveryUpdateSync,
     resetRecoveryState,
     clearSystemErrors,
     resetSyringeStatus,
@@ -102,6 +103,10 @@ function App() {
   const [isCountdownActive, setIsCountdownActive] = useState(false);
   const [countdownStartTime, setCountdownStartTime] = useState(null);
   const [countdownPausedTime, setCountdownPausedTime] = useState(0); // accumulated paused time
+  
+  // Use a ref to track the exact countdown time for pausing
+  const countdownTimeRef = useRef(0);
+  const isCountdownActiveRef = useRef(false);
 
   // Fetch server IP on component mount
   useEffect(() => {
@@ -141,24 +146,37 @@ function App() {
         const savedCountdownTime = recoveryState.countdownTime;
         const wasActive = recoveryState.isCountdownActive;
         const savedStartTime = recoveryState.countdownStartTime;
+        const savedPausedTime = recoveryState.countdownPausedTime || 0;
+        const pauseStartTime = recoveryState.pauseStartTime;
         
         // If the countdown was active, we need to calculate how much time has passed
-        // and adjust the remaining time accordingly
+        // and adjust the remaining time accordingly, accounting for paused time
         if (wasActive && savedStartTime && savedCountdownTime > 0) {
           const now = Date.now();
-          const elapsedSinceStart = Math.floor((now - savedStartTime) / 1000);
-          const adjustedCountdownTime = Math.max(0, savedCountdownTime - elapsedSinceStart);
+          const totalElapsedSinceStart = Math.floor((now - savedStartTime) / 1000);
+          const activeElapsedTime = totalElapsedSinceStart - savedPausedTime;
+          const adjustedCountdownTime = Math.max(0, savedCountdownTime - activeElapsedTime);
           
           setCountdownTime(adjustedCountdownTime);
           setIsCountdownActive(adjustedCountdownTime > 0); // Only active if time remaining
+        } else if (!wasActive && pauseStartTime && savedCountdownTime > 0) {
+          // Timer was paused - we need to account for the time spent paused since last save
+          const now = Date.now();
+          const additionalPausedTime = Math.floor((now - pauseStartTime) / 1000);
+          const totalPausedTime = savedPausedTime + additionalPausedTime;
+          
+          // Update the paused time but keep countdown time as-is since it was paused
+          setCountdownTime(savedCountdownTime);
+          setIsCountdownActive(false);
+          setCountdownPausedTime(totalPausedTime);
         } else {
           // Timer was paused or finished, restore as-is
           setCountdownTime(savedCountdownTime);
           setIsCountdownActive(wasActive && savedCountdownTime > 0);
+          setCountdownPausedTime(savedPausedTime);
         }
         
         setCountdownStartTime(savedStartTime);
-        setCountdownPausedTime(recoveryState.countdownPausedTime || 0);
       }
     }
   }, [recoveryState]);
@@ -240,27 +258,32 @@ function App() {
     };
   }, [espOutputs, parameters, sendButtonCommand, sendRecoveryUpdate, setCycleState, setActiveButton, setIsPaused, setVialSetupStep, setShowVialSetup, setActiveTab, cycleStartTimestamp]);
 
-  // Countdown timer logic
+  // Countdown timer logic - using a single persistent interval
   useEffect(() => {
     let interval = null;
     let saveInterval = null;
     
-    if (isCountdownActive && countdownTime > 0) {
+    // Start interval when countdown becomes active for the first time
+    if (isCountdownActive) {
       interval = setInterval(() => {
-        setCountdownTime((prevTime) => {
-          if (prevTime <= 1) {
+        // Only decrement if the timer is still active (check the ref for immediate updates)
+        if (isCountdownActiveRef.current && countdownTimeRef.current > 0) {
+          const newTime = countdownTimeRef.current - 1;
+          countdownTimeRef.current = newTime; // Update ref immediately
+          setCountdownTime(newTime); // Update state
+          
+          if (newTime <= 0) {
             setIsCountdownActive(false);
-            return 0;
+            isCountdownActiveRef.current = false;
           }
-          return prevTime - 1;
-        });
+        }
       }, 1000);
       
       // Save countdown state every 10 seconds while active for recovery purposes
       saveInterval = setInterval(() => {
-        if (countdownTime > 0) {
+        if (isCountdownActiveRef.current && countdownTimeRef.current > 0) {
           sendRecoveryUpdate({
-            countdownTime: countdownTime,
+            countdownTime: countdownTimeRef.current,
             isCountdownActive: true,
             countdownStartTime: countdownStartTime,
             countdownPausedTime: countdownPausedTime,
@@ -268,16 +291,22 @@ function App() {
           });
         }
       }, 10000); // Save every 10 seconds
-    } else if (!isCountdownActive && countdownTime !== 0) {
-      clearInterval(interval);
-      clearInterval(saveInterval);
     }
     
     return () => {
-      clearInterval(interval);
-      clearInterval(saveInterval);
+      if (interval) clearInterval(interval);
+      if (saveInterval) clearInterval(saveInterval);
     };
-  }, [isCountdownActive, countdownTime, countdownStartTime, countdownPausedTime, sendRecoveryUpdate]);
+  }, [isCountdownActive]); // Only depend on isCountdownActive to avoid restarting interval
+  
+  // Keep the refs in sync with the state
+  useEffect(() => {
+    countdownTimeRef.current = countdownTime;
+  }, [countdownTime]);
+  
+  useEffect(() => {
+    isCountdownActiveRef.current = isCountdownActive;
+  }, [isCountdownActive]);
 
   // Calculate total experiment time based on parameters
   const calculateExperimentTime = () => {
@@ -340,6 +369,10 @@ function App() {
     setCountdownStartTime(Date.now());
     setCountdownPausedTime(0);
     
+    // Also update the refs
+    countdownTimeRef.current = totalTime;
+    isCountdownActiveRef.current = true;
+    
     sendButtonCommand('startCycle', true);
     setCycleState('started');
     setActiveButton(null);
@@ -357,33 +390,59 @@ function App() {
     });
   };
 
-  const handlePauseCycle = () => {
+  const handlePauseCycle = async () => {
     const isPausing = !isPaused;
+    const now = Date.now();
     
-    // Handle countdown timer pause/resume
     if (isPausing) {
+      // Pausing - immediately stop the timer and preserve exact time
+      isCountdownActiveRef.current = false; // Stop timer immediately
       setIsCountdownActive(false);
+      
+      await sendRecoveryUpdateSync({
+        parameters,
+        machineStep: 'paused',
+        cycleState: 'paused',
+        lastAction: 'pauseCycle',
+        activeButton: 'pauseCycle',
+        activeTab,
+        countdownTime: countdownTimeRef.current, // Use exact current time from ref
+        isCountdownActive: false,
+        countdownStartTime: countdownStartTime,
+        countdownPausedTime: countdownPausedTime,
+        pauseStartTime: now,
+        lastSavedAt: now,
+      });
     } else {
+      // Resuming - restart timer with preserved time
+      isCountdownActiveRef.current = true; // Start timer immediately
       setIsCountdownActive(true);
+      
+      const pauseStartTime = recoveryState?.pauseStartTime || now;
+      const pauseDuration = Math.floor((now - pauseStartTime) / 1000);
+      const newTotalPausedTime = countdownPausedTime + pauseDuration;
+      setCountdownPausedTime(newTotalPausedTime);
+      
+      await sendRecoveryUpdateSync({
+        parameters,
+        machineStep: 'started',
+        cycleState: 'started',
+        lastAction: 'started',
+        activeButton: null,
+        activeTab,
+        countdownTime: countdownTimeRef.current, // Use exact preserved time
+        isCountdownActive: true,
+        countdownStartTime: countdownStartTime,
+        countdownPausedTime: newTotalPausedTime,
+        pauseStartTime: null,
+        lastSavedAt: now,
+      });
     }
     
     sendButtonCommand('pauseCycle', isPausing);
     setCycleState(isPausing ? 'paused' : 'started');
     setIsPaused(isPausing);
     setActiveButton(isPausing ? 'pauseCycle' : null);
-    sendRecoveryUpdate({
-      parameters,
-      machineStep: isPausing ? 'paused' : 'started',
-      cycleState: isPausing ? 'paused' : 'started',
-      lastAction: isPausing ? 'pauseCycle' : 'started',
-      activeButton: isPausing ? 'pauseCycle' : null,
-      activeTab,
-      countdownTime: countdownTime,
-      isCountdownActive: !isPausing,
-      countdownStartTime: countdownStartTime,
-      countdownPausedTime: countdownPausedTime,
-      lastSavedAt: Date.now(),
-    });
   };
 
   const handleEndCycle = () => {
@@ -421,16 +480,53 @@ function App() {
     setActiveTab('parameters'); // Switch to the "Set Parameters" tab
   };
 
-  const handleExtract = () => {
+  const handleExtract = async () => {
     const isCanceling = activeButton === 'extract';
+    const now = Date.now();
     
-    // Handle countdown timer pause/resume for extract
     if (!isCanceling) {
-      // Starting extraction - pause countdown
+      // Starting extraction - immediately stop timer and preserve exact time
+      isCountdownActiveRef.current = false; // Stop timer immediately
       setIsCountdownActive(false);
+      
+      await sendRecoveryUpdateSync({
+        parameters,
+        machineStep: 'extract',
+        cycleState: 'extract',
+        lastAction: 'extract',
+        activeButton: 'extract',
+        activeTab,
+        countdownTime: countdownTimeRef.current, // Use exact current time from ref
+        isCountdownActive: false,
+        countdownStartTime: countdownStartTime,
+        countdownPausedTime: countdownPausedTime,
+        pauseStartTime: now,
+        lastSavedAt: now,
+      });
     } else {
-      // Canceling extraction - resume countdown
+      // Canceling extraction - restart timer with preserved time
+      isCountdownActiveRef.current = true; // Start timer immediately
       setIsCountdownActive(true);
+      
+      const pauseStartTime = recoveryState?.pauseStartTime || now;
+      const pauseDuration = Math.floor((now - pauseStartTime) / 1000);
+      const newTotalPausedTime = countdownPausedTime + pauseDuration;
+      setCountdownPausedTime(newTotalPausedTime);
+      
+      await sendRecoveryUpdateSync({
+        parameters,
+        machineStep: 'started',
+        cycleState: 'started',
+        lastAction: 'started',
+        activeButton: null,
+        activeTab,
+        countdownTime: countdownTimeRef.current, // Use exact preserved time
+        isCountdownActive: true,
+        countdownStartTime: countdownStartTime,
+        countdownPausedTime: newTotalPausedTime,
+        pauseStartTime: null,
+        lastSavedAt: now,
+      });
     }
     
     sendButtonCommand('extract', !isCanceling); // send "on" if starting, "off" if canceling
@@ -452,43 +548,38 @@ function App() {
         extractionReady: 'N/A'
       }));
     }
-    
-    sendRecoveryUpdate({
-      parameters,
-      machineStep: isCanceling ? 'started' : 'extract',
-      cycleState: isCanceling ? 'started' : 'extract',
-      lastAction: isCanceling ? 'started' : 'extract',
-      activeButton: isCanceling ? null : 'extract',
-      activeTab,
-      countdownTime: countdownTime,
-      isCountdownActive: isCanceling,
-      countdownStartTime: countdownStartTime,
-      countdownPausedTime: countdownPausedTime,
-      lastSavedAt: Date.now(),
-    });
   };
 
-  const handleRefill = () => {
+  const handleRefill = async () => {
     const isCanceling = activeButton === 'refill';
+    const now = Date.now();
     
     if (isCanceling) {
-      // If canceling, send the command immediately and resume countdown
+      // If canceling, resume countdown immediately
+      isCountdownActiveRef.current = true; // Start timer immediately
       setIsCountdownActive(true);
+      
+      const pauseStartTime = recoveryState?.pauseStartTime || now;
+      const pauseDuration = Math.floor((now - pauseStartTime) / 1000);
+      const newTotalPausedTime = countdownPausedTime + pauseDuration;
+      setCountdownPausedTime(newTotalPausedTime);
+      
       sendButtonCommand('refill', false); // send "off" when canceling
       setCycleState('started');
       setActiveButton(null);
-      sendRecoveryUpdate({
+      await sendRecoveryUpdateSync({
         parameters,
         machineStep: 'started',
         cycleState: 'started',
         lastAction: 'started',
         activeButton: null,
         activeTab,
-        countdownTime: countdownTime,
+        countdownTime: countdownTimeRef.current, // Use exact preserved time
         isCountdownActive: true,
         countdownStartTime: countdownStartTime,
-        countdownPausedTime: countdownPausedTime,
-        lastSavedAt: Date.now(),
+        countdownPausedTime: newTotalPausedTime,
+        pauseStartTime: null,
+        lastSavedAt: now,
       });
     } else {
       // If starting refill, show the popup first
@@ -496,11 +587,12 @@ function App() {
     }
   };
 
-  const handleRefillConfirm = () => {
+  const handleRefillConfirm = async () => {
     // This is called when user clicks "Yes" in the refill popup
     setShowRefillPopup(false);
     
-    // Pause countdown during refill
+    // Immediately stop timer and preserve exact time
+    isCountdownActiveRef.current = false; // Stop timer immediately
     setIsCountdownActive(false);
     
     // Reset syringe status to ready
@@ -510,17 +602,18 @@ function App() {
     sendButtonCommand('refill', true); // send "on" to start refilling
     setCycleState('refill');
     setActiveButton('refill');
-    sendRecoveryUpdate({
+    await sendRecoveryUpdateSync({
       parameters,
       machineStep: 'refill',
       cycleState: 'refill',
       lastAction: 'refill',
       activeButton: 'refill',
       activeTab,
-      countdownTime: countdownTime,
+      countdownTime: countdownTimeRef.current, // Use exact current time from ref
       isCountdownActive: false,
       countdownStartTime: countdownStartTime,
       countdownPausedTime: countdownPausedTime,
+      pauseStartTime: Date.now(),
       lastSavedAt: Date.now(),
     });
   };

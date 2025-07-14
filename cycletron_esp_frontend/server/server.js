@@ -202,6 +202,9 @@ db.run(`CREATE TABLE IF NOT EXISTS esp_recovery_state (
   loadEspRecoveryStateFromDatabase();
 });
 
+// ----------------- Middleware -----------------
+app.use(express.json()); // Parse JSON request bodies
+
 // ----------------- API Routes -----------------
 app.get('/api/history', (req, res) => {
   db.all('SELECT * FROM temperature_log ORDER BY id DESC LIMIT 100', (err, rows) => {
@@ -236,6 +239,30 @@ app.post('/api/resetRecoveryState', (req, res) => {
   espRecoveryState = {}; // Reset ESP32 in-memory state
   
   res.json({ success: true });
+});
+
+// Add synchronous recovery state update endpoint for critical state changes
+app.post('/api/updateRecoveryState', (req, res) => {
+  try {
+    recoveryState = { ...recoveryState, ...req.body };
+    saveRecoveryState(); // Save the updated recovery state to the file
+    console.log('Updated recovery state via HTTP:', recoveryState);
+
+    // Only broadcast to frontend clients
+    for (const client of clients) {
+      if (
+        client.readyState === WebSocket.OPEN &&
+        !espClients.has(client) // Only send to non-ESP32 clients
+      ) {
+        client.send(JSON.stringify({ type: 'recoveryState', data: recoveryState }));
+      }
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to update recovery state:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Add route to get recovery state

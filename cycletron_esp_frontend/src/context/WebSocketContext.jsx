@@ -234,6 +234,34 @@ export function WebSocketProvider({ children }) {
 
     const sendRecoveryUpdate = (data) => sendMessage({ type: 'updateRecoveryState', data });
 
+    // Synchronous recovery update for critical state changes (pause/resume)
+    const sendRecoveryUpdateSync = async (data) => {
+        try {
+            const response = await fetch('/api/updateRecoveryState', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            if (result.success) {
+                // Update local recovery state immediately
+                setRecoveryState(prev => ({ ...prev, ...data }));
+            }
+            return result.success;
+        } catch (error) {
+            console.error('Failed to sync recovery state:', error);
+            // Fall back to async WebSocket update
+            return sendMessage({ type: 'updateRecoveryState', data });
+        }
+    };
+
     const resetRecoveryState = () => {
         fetch('/api/resetRecoveryState', { method: 'POST' })
             .then((res) => res.json())
@@ -322,6 +350,7 @@ export function WebSocketProvider({ children }) {
         sendParameters,
         sendButtonCommand,
         sendRecoveryUpdate,
+        sendRecoveryUpdateSync,
         isConnected,
         sendMessage,
         resetRecoveryState,
